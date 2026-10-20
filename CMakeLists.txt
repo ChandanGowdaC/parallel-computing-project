@@ -45,6 +45,11 @@ add_executable(test_thread_pool "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_thread_p
 target_link_libraries(test_thread_pool PRIVATE Threads::Threads)
 add_test(NAME ThreadPoolTest COMMAND test_thread_pool)
 
+# Person C visibility grouping, parallel solve dispatch, and plan merge test
+add_executable(test_gd_rhcr "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_gd_rhcr.cpp")
+target_link_libraries(test_gd_rhcr PRIVATE Threads::Threads)
+add_test(NAME GDRHCRTest COMMAND test_gd_rhcr)
+
 # 2. ParallelExecutor wrapper test
 add_executable(test_parallel_executor "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_parallel_executor.cpp")
 target_link_libraries(test_parallel_executor PRIVATE Threads::Threads)
