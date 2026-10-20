@@ -1,28 +1,74 @@
-# Build artifacts
+# ─── Python & Virtual Environments ───────────────────────────
+.venv/
+venv/
+env/
+ENV/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.mypy_cache/
+
+# ─── C++ & Build Artifacts ──────────────────────────────────
 build/
 bin/
 Debug/
 Release/
 *.o
 *.obj
+*.a
+*.lib
+*.so
+*.dylib
+*.dll
 *.exe
 *.out
 *.app
 *.dSYM/
+lifelong
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
 
-# IDE and Editor files
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-.DS_Store
-
-# Experiment output
-exp/
-experiments/
-
-# Visual Studio files
+# ─── Visual Studio Files ────────────────────────────────────
 lifelong.vcxproj
 lifelong.vcxproj.filters
 lifelong.vcxproj.user
+
+# ─── Experiment Raw Data & Logs ──────────────────────────────
+# Ignore experiment output runs and raw per-run CSVs (keep tracked config & scripts)
+exp/
+results/raw/*.csv
+results/logs/
+*.log
+results/experiment_summary.csv
+
+# Keep directory structure in git
+!results/raw/.gitkeep
+!results/aggregated/.gitkeep
+!results/figures/.gitkeep
+!results/logs/.gitkeep
+
+# ─── LaTeX Auxiliary Files ───────────────────────────────────
+*.aux
+*.bbl
+*.bcf
+*.blg
+*.fdb_latexmk
+*.fls
+*.lof
+*.lot
+*.run.xml
+*.synctex.gz
+*.toc
+
+# ─── OS & IDE Specific ───────────────────────────────────────
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+*~

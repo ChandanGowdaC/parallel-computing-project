@@ -1,0 +1,82 @@
+# ─────────────────────────────────────────────────────────────────
+# GD-RHCR Experiment Sweep Configuration
+# Person D — Evaluation & Benchmarking
+# ─────────────────────────────────────────────────────────────────
+
+# Path to the compiled RHCR binary
+binary: "./lifelong"
+
+# Output directory for raw CSV results
+output_dir: "../results/raw"
+
+# Map configurations
+maps:
+  - name: "kiva"
+    file: "maps/kiva.map"
+    scenario: "KIVA"
+  # Uncomment when sorting-center map is ready:
+  # - name: "sorting"
+  #   file: "maps/sorting.map"
+  #   scenario: "SORTING"
+
+# Solver to use
+solver: "ECBS"
+
+# ─────────────────────────────────────────────────────────────────
+# Sweep parameters (cartesian product of all combinations)
+# ─────────────────────────────────────────────────────────────────
+
+# Solver modes to compare
+solver_modes:
+  - "sequential"
+  - "parallel"
+
+# Thread counts (only relevant for parallel mode; sequential always uses 1)
+thread_counts: [1, 2, 4, 8, 16]
+
+# Number of agents in the warehouse
+agent_counts: [50, 100, 200, 400, 800]
+
+# Poisson task arrival rate (lambda)
+task_arrival_rates: [0.2, 0.5, 1.0, 2.0, 5.0]
+
+# GD-RHCR visibility radius for group partitioning
+# (only relevant for parallel mode; sequential ignores this)
+visibility_radii: [5.0, 10.0, 20.0]
+
+# RHCR planning parameters
+planning_horizon_h: 20
+planning_window_w: 10
+
+# Random seeds for reproducibility (each config runs once per seed)
+seeds: [42, 123, 456, 789, 1024]
+
+# ─────────────────────────────────────────────────────────────────
+# Execution settings
+# ─────────────────────────────────────────────────────────────────
+
+# Maximum wall-clock seconds per single run before timeout
+timeout_seconds: 300
+
+# Simulation length in timesteps
+simulation_timesteps: 5000
+
+# Number of parallel experiment processes (NOT solver threads)
+# Set to number of CPU cores available on the machine / cluster
+max_parallel_runs: 4
+
+# Scheduling policy for deadline experiments (Person B)
+scheduling_policies:
+  - "FIFO"
+  - "EDF"
+  - "DEADLINE_AWARE"
+
+# ─────────────────────────────────────────────────────────────────
+# Quick-test config (uncomment to run a small sanity check)
+# ─────────────────────────────────────────────────────────────────
+# quick_test:
+#   thread_counts: [1, 2, 4]
+#   agent_counts: [50, 100]
+#   task_arrival_rates: [1.0]
+#   seeds: [42]
+#   simulation_timesteps: 500

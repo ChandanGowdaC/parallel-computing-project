@@ -28,11 +28,29 @@ An empirical implementation and benchmarking framework for **Group Decentralized
 │   ├── sweep_experiments.py       # Experiment sweeper across threads and agents
 │   ├── plot_results.py            # Metrics analysis and speedup plot generator
 │   └── plot_deadline_metrics.py   # Deadline satisfaction & tardiness plotter (Person B/D)
-└── tests/
-    ├── test_thread_pool.cpp       # ThreadPool unit & concurrency test
-    ├── test_parallel_executor.cpp # ParallelExecutor unit & parallel_map test
-    ├── test_interfaces.cpp        # Day One contract validation tests
-    └── test_deadline_workload.cpp # Person B deadline workload & policy test suite
+├── tests/
+│   ├── test_thread_pool.cpp       # ThreadPool unit & concurrency test
+│   ├── test_parallel_executor.cpp # ParallelExecutor unit & parallel_map test
+│   ├── test_interfaces.cpp        # Day One contract validation tests
+│   └── test_deadline_workload.cpp # Person B deadline workload & policy test suite
+├── metrics/                       # Person D: Metrics schema & C++ thread-safe logger
+│   ├── metrics_schema.json        # CSV schema specification
+│   └── metrics_logger.h           # C++ header-only logger
+├── experiments/                   # Person D: Experiment orchestration
+│   ├── sweep_config.yaml          # Full parameter sweep configuration
+│   └── run_experiments.sh         # Automated experiment runner
+├── analysis/                      # Person D: Python analysis pipeline
+│   ├── requirements.txt           # Python dependencies
+│   ├── generate_stub_data.py      # Synthetic data generator
+│   ├── aggregate_results.py       # Cross-seed aggregation + speedup/efficiency
+│   └── plot_results.py            # 10 publication-quality figure generators
+├── results/                       # Person D: Output directories
+│   ├── raw/                       # Raw per-run CSV files
+│   ├── aggregated/                # Aggregated summary tables
+│   └── figures/                   # Generated PNG figures
+└── report/                        # Person D: Report materials
+    ├── evaluation_section.tex     # LaTeX template (evaluation section)
+    └── literature_comparison.md   # Reference numbers from papers
 ```
 
 ---
@@ -198,9 +216,10 @@ To avoid merge conflicts, team members agree on and consume the following header
    - Defines `GroupPlanningResult` (paths, solve runtime, success status).
    - `WindowedGroupSolverFn` callable type signature for dispatching to `ThreadPool`.
 
-3. **`inc/Metrics.h` (Person D interface)**:
+3. **`inc/Metrics.h` & `metrics/metrics_logger.h` (Person D interface)**:
    - `struct RunMetrics`: Uniform CSV header and row serialization for throughput, speedup, wall-clock runtime, and deadline satisfaction rates.
    - `save_tasks_csv(...)`: Detailed per-task completion logs.
+   - `metrics::MetricsLogger`: Thread-safe logger for episode and run metrics.
 
 4. **Correctness Flag**:
    - Running with `--parallel 0` guarantees execution against the sequential baseline.
@@ -217,3 +236,64 @@ To avoid merge conflicts, team members agree on and consume the following header
   - Spatial visibility grouping algorithm, concurrent group solver dispatch using `ParallelExecutor`, merging group paths into global plan.
 - **Person D (Evaluation & Benchmarking)**:
   - Experiment sweeps over thread count ($1, 2, 4, 8$), agent count ($50 \dots 800$), and arrival rates; speedup curves, throughput comparison vs. paper claims.
+
+---
+
+## Evaluation & Benchmarking Pipeline (Person D)
+
+This section details the **experiment harness, analysis pipeline, and report materials** developed by Person D for evaluating the GD-RHCR implementation on top of the RHCR warehouse MAPF simulator.
+
+### Quick Start (Analysis Pipeline)
+
+#### 1. Install Python dependencies
+```bash
+cd analysis
+pip install -r requirements.txt
+```
+
+#### 2. Generate synthetic stub data (sanity check)
+```bash
+python3 generate_stub_data.py --output-dir ../results/raw --small
+```
+
+#### 3. Aggregate results across seeds
+```bash
+python3 aggregate_results.py --input-dir ../results/raw --output-dir ../results/aggregated
+```
+
+#### 4. Generate publication figures
+```bash
+python3 plot_results.py --input-dir ../results/aggregated --output-dir ../results/figures
+```
+
+#### 5. Run full experiment sweeps
+```bash
+cd experiments
+chmod +x run_experiments.sh
+./run_experiments.sh --quick      # sanity check
+./run_experiments.sh              # full sweep
+```
+
+### Generated Figures
+
+| # | Figure | Description |
+|---|--------|-------------|
+| 1 | `speedup_vs_threads.png` | Speedup vs. thread count (per agent count) |
+| 2 | `efficiency_vs_threads.png` | Parallel efficiency vs. thread count |
+| 3 | `throughput_comparison.png` | Throughput: sequential vs. parallel |
+| 4 | `deadline_vs_arrival_rate.png` | Deadline satisfaction vs. arrival rate |
+| 5 | `tardiness_comparison.png` | Average tardiness comparison |
+| 6 | `runtime_scalability.png` | Runtime vs. agent count (log scale) |
+| 7 | `policy_comparison.png` | Scheduling policy comparison |
+| 8 | `speedup_heatmap.png` | Speedup heatmap: agents × threads |
+| 9 | `visibility_radius_impact.png` | Impact of visibility radius on speedup |
+| 10 | `literature_comparison.png` | Comparison with published results |
+
+### Literature Reference Numbers
+
+| Source | Metric | Value |
+|--------|--------|-------|
+| GD-RHCR paper (DeWeese et al., 2026) | Throughput improvement | 57.7% |
+| GD-RHCR paper | Per-plan computation speedup | 24.9× |
+| CPLNS | Computation speedup | 21.95× |
+| TACKLE | Cost improvement | ≥60% |

@@ -1,0 +1,239 @@
+\section{Evaluation}
+\label{sec:evaluation}
+
+% ═══════════════════════════════════════════════════════════════════
+% Person D owns this section. Fill in numbers from experiment results.
+% ═══════════════════════════════════════════════════════════════════
+
+\subsection{Experimental Setup}
+
+\subsubsection{Environment}
+We evaluate our GD-RHCR implementation on the KIVA warehouse map from the RHCR
+codebase~\cite{li2021rhcr}, which models a fulfillment center with $X \times Y$
+cells, $E$ endpoints, and $W$ workstations.
+
+All experiments were conducted on [MACHINE SPECS: CPU model, cores, RAM, OS].
+The implementation uses C++17 compiled with GCC [VERSION] and the \texttt{-O2}
+optimization flag.
+
+\subsubsection{Parameters}
+Table~\ref{tab:params} summarizes the parameter space explored.
+
+\begin{table}[h]
+\centering
+\caption{Experiment Parameter Space}
+\label{tab:params}
+\begin{tabular}{ll}
+\toprule
+\textbf{Parameter} & \textbf{Values} \\
+\midrule
+Agent count ($k$) & 50, 100, 200, 400, 800 \\
+Thread count ($p$) & 1, 2, 4, 8, 16 \\
+Task arrival rate ($\lambda$) & 0.2, 0.5, 1.0, 2.0, 5.0 \\
+Visibility radius ($V$) & 5.0, 10.0, 20.0 \\
+Planning horizon ($h$) & 20 timesteps \\
+Planning window ($w$) & 10 timesteps \\
+Simulation length & 5000 timesteps \\
+Scheduling policies & FIFO, EDF, Deadline-Aware \\
+Random seeds & 5 per configuration \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Each configuration was run with 5 different random seeds, and we report mean
+values with standard deviations.
+
+\subsubsection{Metrics}
+We evaluate performance using the following metrics:
+\begin{itemize}
+    \item \textbf{Speedup} $S_p = T_1 / T_p$: ratio of sequential to parallel
+          wall-clock runtime.
+    \item \textbf{Parallel Efficiency} $E_p = S_p / p$: how effectively threads
+          are utilized.
+    \item \textbf{Throughput}: tasks completed per simulation timestep.
+    \item \textbf{Deadline Satisfaction Rate}: fraction of tasks completed before
+          their deadline.
+    \item \textbf{Tardiness}: $\max(0, t_{\text{completion}} - t_{\text{deadline}})$
+          for overdue tasks.
+\end{itemize}
+
+% ═══════════════════════════════════════════════════════════════════
+\subsection{Parallel Speedup and Efficiency}
+
+Figure~\ref{fig:speedup} shows the speedup achieved by GD-RHCR as a function of
+thread count for different agent counts at $\lambda = 1.0$.
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.85\textwidth]{figures/speedup_vs_threads.png}
+    \caption{Speedup vs. thread count for varying agent counts ($\lambda=1.0$,
+    $V=10.0$). The dashed line indicates ideal linear speedup.}
+    \label{fig:speedup}
+\end{figure}
+
+% TODO: Fill in actual numbers
+Our implementation achieves a maximum speedup of \textbf{\_\_\_$\times$} with
+$k=800$ agents and $p=16$ threads. The sub-linear scaling is expected due to:
+(1) serial fraction in the replanning loop (group formation, result merging),
+(2) load imbalance across spatial groups, and
+(3) thread management overhead.
+
+Figure~\ref{fig:efficiency} shows parallel efficiency, which remains above
+\_\_\% for up to $p=8$ threads and drops to \_\_\% at $p=16$, suggesting
+diminishing returns beyond 8 threads for this workload.
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.85\textwidth]{figures/efficiency_vs_threads.png}
+    \caption{Parallel efficiency vs. thread count.}
+    \label{fig:efficiency}
+\end{figure}
+
+Figure~\ref{fig:heatmap} presents a heatmap of speedup across the full
+agent count $\times$ thread count parameter space.
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.75\textwidth]{figures/speedup_heatmap.png}
+    \caption{Speedup heatmap: agent count vs. thread count ($\lambda=1.0$, $V=10.0$).}
+    \label{fig:heatmap}
+\end{figure}
+
+% ═══════════════════════════════════════════════════════════════════
+\subsection{Throughput Analysis}
+
+Figure~\ref{fig:throughput} compares throughput between sequential RHCR and
+our parallel GD-RHCR implementation across different agent counts.
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.8\textwidth]{figures/throughput_comparison.png}
+    \caption{Throughput comparison: Sequential vs. Parallel (best thread configuration).}
+    \label{fig:throughput}
+\end{figure}
+
+% TODO: Fill in
+Our implementation achieves a throughput improvement of \textbf{\_\_\_\%} at
+$k=800$ agents, compared to the GD-RHCR paper's reported 57.7\%.
+
+% ═══════════════════════════════════════════════════════════════════
+\subsection{Runtime Scalability}
+
+Figure~\ref{fig:scalability} shows how total runtime scales with agent count
+for sequential and parallel configurations.
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.8\textwidth]{figures/runtime_scalability.png}
+    \caption{Runtime vs. agent count on log scale ($\lambda=1.0$).}
+    \label{fig:scalability}
+\end{figure}
+
+% ═══════════════════════════════════════════════════════════════════
+\subsection{Impact of Visibility Radius}
+
+The visibility radius $V$ controls the spatial partitioning granularity in
+GD-RHCR. Figure~\ref{fig:vr_impact} shows its effect on speedup and group count.
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.9\textwidth]{figures/visibility_radius_impact.png}
+    \caption{Impact of visibility radius on speedup and group formation ($k=400$).}
+    \label{fig:vr_impact}
+\end{figure}
+
+% ═══════════════════════════════════════════════════════════════════
+\subsection{Deadline-Aware Scheduling}
+
+\subsubsection{Deadline Satisfaction under Load}
+Figure~\ref{fig:deadline_rate} shows deadline satisfaction rate as task arrival
+rate increases, comparing sequential and parallel configurations.
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.8\textwidth]{figures/deadline_vs_arrival_rate.png}
+    \caption{Deadline satisfaction rate vs. task arrival rate ($k=200$).}
+    \label{fig:deadline_rate}
+\end{figure}
+
+\subsubsection{Scheduling Policy Comparison}
+Figure~\ref{fig:policy} compares FIFO, EDF, and Deadline-Aware policies.
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.7\textwidth]{figures/policy_comparison.png}
+    \caption{Scheduling policy comparison ($k=200$, $\lambda=2.0$).}
+    \label{fig:policy}
+\end{figure}
+
+\subsubsection{Tardiness Analysis}
+Figure~\ref{fig:tardiness} shows the average tardiness for overdue tasks.
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.7\textwidth]{figures/tardiness_comparison.png}
+    \caption{Average tardiness comparison ($k=400$, $\lambda=2.0$).}
+    \label{fig:tardiness}
+\end{figure}
+
+% ═══════════════════════════════════════════════════════════════════
+\subsection{Comparison with Published Results}
+
+Table~\ref{tab:literature} compares our empirical results with claims from
+the GD-RHCR paper and related work.
+
+\begin{table}[h]
+\centering
+\caption{Comparison with Published Results}
+\label{tab:literature}
+\begin{tabular}{lccc}
+\toprule
+\textbf{Metric} & \textbf{GD-RHCR (Paper)} & \textbf{CPLNS} & \textbf{Ours} \\
+\midrule
+Max speedup & 24.9$\times$ & 21.95$\times$ & \_\_\_$\times$ \\
+Throughput improvement & 57.7\% & --- & \_\_\_\% \\
+Agent scale tested & 800 & 1000 & 800 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.9\textwidth]{figures/literature_comparison.png}
+    \caption{Visual comparison with published results.}
+    \label{fig:lit_comparison}
+\end{figure}
+
+% TODO: Discuss gaps between paper claims and our numbers
+% If our numbers are lower, explain why (implementation overhead, different
+% hardware, real vs. theoretical parallelism)
+% If our numbers are close, that validates the paper's claims
+
+% ═══════════════════════════════════════════════════════════════════
+\subsection{Key Findings}
+
+\begin{enumerate}
+    \item \textbf{Speedup}: GD-RHCR achieves \_\_\_$\times$ speedup at $k=800$,
+          $p=16$, demonstrating effective parallelization through spatial
+          group partitioning.
+    \item \textbf{Efficiency}: Parallel efficiency remains above \_\_\% for
+          $p \leq 8$, beyond which communication overhead dominates.
+    \item \textbf{Throughput}: \_\_\_\% throughput improvement over sequential
+          RHCR, compared to the paper's claimed 57.7\%.
+    \item \textbf{Deadline satisfaction}: Parallel execution improves deadline
+          satisfaction by \_\_\% under heavy load ($\lambda \geq 2.0$), with
+          EDF providing the best results.
+    \item \textbf{Visibility radius}: $V=10.0$ provides the best speedup-quality
+          tradeoff; smaller $V$ creates too many small groups, larger $V$ creates
+          too few groups for effective parallelism.
+\end{enumerate}
+
+\subsection{Threats to Validity}
+\begin{itemize}
+    \item Results are limited to the KIVA warehouse map; different map topologies
+          may yield different group formation patterns and speedup characteristics.
+    \item Our deadline extension is not part of the original GD-RHCR paper and
+          may introduce overhead not present in their theoretical analysis.
+    \item Hardware differences between our testbed and the paper's may account
+          for some performance gaps.
+\end{itemize}
