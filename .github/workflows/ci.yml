@@ -35,7 +35,7 @@ jobs:
           chmod +x build.sh run.sh
           ./build.sh
 
-      - name: Run ThreadPool Unit Tests
+      - name: Run All Unit & Interface Tests
         run: |
           ./run.sh test
 
@@ -43,3 +43,8 @@ jobs:
         run: |
           ./run.sh --scenario=KIVA -m maps/kiva.map -k 20 --simulation_window=1 --solver=ECBS --suboptimal_bound=1.5 --dummy_paths=1 --seed=0 --simulation_time=5 -o exp/ci_test --csv_metrics=exp/ci_metrics.csv
           cat exp/ci_metrics.csv
+
+      - name: Verify Experiment Sweep & Plotting Pipeline
+        run: |
+          python3 scripts/sweep_experiments.py --smoke
+          python3 scripts/plot_results.py

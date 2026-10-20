@@ -14,10 +14,24 @@ if [[ ! -x "${BIN_PATH}" || ! -x "${TEST_BIN}" ]]; then
     "${PROJECT_ROOT}/build.sh"
 fi
 
-# Shortcut to run thread pool test
-if [[ "$1" == "--test-threads" || "$1" == "test" ]]; then
-    echo "Running ThreadPool verification test..."
-    exec "${TEST_BIN}"
+# Shortcut to run all unit tests
+if [[ "$1" == "--test" || "$1" == "test" || "$1" == "-t" ]]; then
+    echo "=================================================="
+    echo "  Running All Verification & Regression Tests"
+    echo "=================================================="
+    echo "[1/3] Running ThreadPool verification..."
+    "${PROJECT_ROOT}/build/test_thread_pool"
+    echo ""
+    echo "[2/3] Running ParallelExecutor verification..."
+    "${PROJECT_ROOT}/build/test_parallel_executor"
+    echo ""
+    echo "[3/3] Running Day One Interfaces contract verification..."
+    "${PROJECT_ROOT}/build/test_interfaces"
+    echo ""
+    echo "=================================================="
+    echo "  ALL VERIFICATION TESTS PASSED SUCCESSFULLY!"
+    echo "=================================================="
+    exit 0
 fi
 
 # If no arguments provided, run a baseline smoke test

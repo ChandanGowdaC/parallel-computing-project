@@ -46,6 +46,8 @@ mkdir -p "${PROJECT_ROOT}/build"
 if [[ "${BUILD_DIR}" != "${PROJECT_ROOT}/build" ]]; then
     ln -sfn "${BUILD_DIR}/lifelong" "${PROJECT_ROOT}/build/lifelong"
     ln -sfn "${BUILD_DIR}/test_thread_pool" "${PROJECT_ROOT}/build/test_thread_pool"
+    ln -sfn "${BUILD_DIR}/test_parallel_executor" "${PROJECT_ROOT}/build/test_parallel_executor"
+    ln -sfn "${BUILD_DIR}/test_interfaces" "${PROJECT_ROOT}/build/test_interfaces"
 fi
 
 echo ""
@@ -54,4 +56,6 @@ echo "  Build successful!"
 echo "  Binaries created:"
 echo "    - ${PROJECT_ROOT}/build/lifelong"
 echo "    - ${PROJECT_ROOT}/build/test_thread_pool"
+echo "    - ${PROJECT_ROOT}/build/test_parallel_executor"
+echo "    - ${PROJECT_ROOT}/build/test_interfaces"
 echo "=================================================="

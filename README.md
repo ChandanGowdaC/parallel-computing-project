@@ -8,19 +8,26 @@ An empirical implementation and benchmarking framework for **Group Decentralized
 
 ```
 ├── .github/workflows/ci.yml       # Automated CI (Linux & macOS)
+├── Dockerfile                     # Containerized environment (Ubuntu 22.04 LTS)
 ├── build.sh                       # One-command reproducible build
-├── run.sh                         # Execution wrapper (baseline, test, custom args)
+├── run.sh                         # Execution wrapper (baseline, tests, custom args)
 ├── CMakeLists.txt                 # Modern CMake configuration (>= 3.10)
 ├── inc/
 │   ├── ThreadPool.h               # ThreadPool primitive (progschj/ThreadPool)
-│   ├── Task.h                     # Person B Task contract (deadlines, tardiness)
-│   ├── SolverInterface.h          # Person A/C Solver contract (GroupPlanningTask)
-│   ├── Metrics.h                  # Person D Metrics contract (CSV/JSON schema)
+│   ├── ParallelExecutor.h         # Reusable parallel primitive utility (Person A/C)
+│   ├── Task.h                     # Task contract (deadlines, tardiness) (Person B)
+│   ├── SolverInterface.h          # Solver contract (GroupPlanningTask) (Person A/C)
+│   ├── Metrics.h                  # Metrics contract (CSV/JSON schema) (Person D)
 │   └── ...                        # RHCR core headers
 ├── src/                           # RHCR core sources + driver
 ├── maps/                          # Warehouse maps (kiva.map, sorting grids)
+├── scripts/
+│   ├── sweep_experiments.py       # Experiment sweeper across threads and agents
+│   └── plot_results.py            # Metrics analysis and speedup plot generator
 └── tests/
-    └── test_thread_pool.cpp       # ThreadPool unit & concurrency test
+    ├── test_thread_pool.cpp       # ThreadPool unit & concurrency test
+    ├── test_parallel_executor.cpp # ParallelExecutor unit & parallel_map test
+    └── test_interfaces.cpp        # Day One contract validation tests
 ```
 
 ---
@@ -30,7 +37,8 @@ An empirical implementation and benchmarking framework for **Group Decentralized
 ### 1. Prerequisites
 
 - **macOS**: `brew install boost cmake`
-- **Linux (Ubuntu / Debian)**: `sudo apt-get install -y cmake build-essential libboost-all-dev`
+- **Linux (Ubuntu / Debian)**: `sudo apt-get install -y cmake build-essential libboost-all-dev python3`
+- **Docker** (alternative): `docker build -t gd-rhcr . && docker run --rm -it gd-rhcr`
 
 ### 2. Build
 
@@ -42,14 +50,14 @@ Run the automated build script (handles dependencies, parallel compilation, and 
 Binaries will be placed in `./build/`:
 - `./build/lifelong` (Main simulation engine)
 - `./build/test_thread_pool` (ThreadPool verification test)
+- `./build/test_parallel_executor` (ParallelExecutor verification test)
+- `./build/test_interfaces` (Interface contracts validation test)
 
-### 3. Verify ThreadPool & Infra
+### 3. Run All Unit & Interface Tests
 
-Run the threadpool test suite:
+Run all test suites with a single command:
 ```bash
 ./run.sh test
-# or directly:
-./build/test_thread_pool
 ```
 
 ### 4. Run Sequential Baseline
@@ -70,6 +78,43 @@ Or run custom experiment parameters:
 
 ---
 
+## Parallel Primitives (`ParallelExecutor`)
+
+[`inc/ParallelExecutor.h`](inc/ParallelExecutor.h) provides a thread pool wrapper designed specifically for GD-RHCR:
+- `parallel_for(start, end, func)`: Runs loop iterations concurrently across the pool.
+- `parallel_map(inputs, func)`: Concurrently transforms a collection of inputs (e.g. `std::vector<GroupPlanningTask>`) into outputs (e.g. `std::vector<GroupPlanningResult>`).
+- Fallback: When `num_threads == 1`, runs sequentially without thread overhead.
+
+```cpp
+#include "ParallelExecutor.h"
+
+ParallelExecutor executor(4); // 4 worker threads
+auto results = executor.parallel_map(group_tasks, [](const GroupPlanningTask& task) {
+    // Solves windowed MAPF for this group in parallel
+    return solve_group(task);
+});
+```
+
+---
+
+## Automated Experiment Sweeper & Analysis (Person D)
+
+Person A provides automated experiment sweeper and plotting tools in `scripts/`:
+
+```bash
+# 1. Run multi-threaded scaling sweep:
+python3 scripts/sweep_experiments.py --scenario KIVA --solver ECBS --threads 1 2 4 8 --agents 50 100 200 --sim-time 20
+
+# 2. Analyze speedup, efficiency, and generate summary plots:
+python3 scripts/plot_results.py --csv exp/sweep_results.csv
+```
+
+Outputs:
+- Terminal markdown table with Runtime, Speedup ($S_p = T_1 / T_p$), and Parallel Efficiency ($E_p = S_p / p$).
+- Speedup curves and throughput charts in `exp/plots/`.
+
+---
+
 ## Experiment CLI Options (Person A Config System)
 
 | Flag | Short | Default | Description |
@@ -82,6 +127,7 @@ Or run custom experiment parameters:
 | `--deadline_factor` | | `2.0` | Deadline tightness multiplier |
 | `--csv_metrics` | | `""` | Destination path for summary CSV row (Person D) |
 | `--json_metrics` | | `""` | Destination path for summary JSON file (Person D) |
+| `--resume` | | `false` | Resume simulation from existing `paths.txt` in output folder |
 | `--simulation_time` | | `5000` | Total simulation timesteps |
 | `--simulation_window` | | `5` | Replanning period $h$ |
 | `--planning_window` | | `INT_MAX/2` | Collision-free horizon $w$ |
@@ -115,10 +161,10 @@ To avoid merge conflicts, team members agree on and consume the following header
 ## Team Division & Roadmap
 
 - **Person A (Build, Infra & Parallel Primitives)**:
-  - Working baseline build on Linux & macOS, `ThreadPool.h` integration and tests, unified CLI argument system, `build.sh` / `run.sh` / CI scripts.
+  - Working baseline build on Linux & macOS, `ThreadPool.h` & `ParallelExecutor.h` integration and tests, unified CLI argument system, `build.sh` / `run.sh` / CI scripts, automated experiment sweeper.
 - **Person B (Deadline-Aware Workload)**:
   - Task arrival generator (Poisson), deadline assignment, Earliest-Deadline-First / deadline-recovery scheduling, tardiness logging.
 - **Person C (GD-RHCR Parallel Core)**:
-  - Spatial visibility grouping algorithm, concurrent group solver dispatch using `ThreadPool`, merging group paths into global plan.
+  - Spatial visibility grouping algorithm, concurrent group solver dispatch using `ParallelExecutor`, merging group paths into global plan.
 - **Person D (Evaluation & Benchmarking)**:
   - Experiment sweeps over thread count ($1, 2, 4, 8$), agent count ($50 \dots 800$), and arrival rates; speedup curves, throughput comparison vs. paper claims.
