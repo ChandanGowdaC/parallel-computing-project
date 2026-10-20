@@ -1,0 +1,66 @@
+# ─── Python & Virtual Environments ───────────────────────────
+.venv/
+venv/
+env/
+ENV/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.mypy_cache/
+
+# ─── C++ & Build Artifacts ──────────────────────────────────
+build/
+bin/
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.dylib
+*.dll
+*.exe
+*.out
+lifelong
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+
+# ─── Experiment Raw Data & Logs ──────────────────────────────
+# Ignore raw per-run CSVs and logs (can be thousands of files / gigabytes)
+results/raw/*.csv
+results/logs/
+*.log
+results/experiment_summary.csv
+
+# Keep directories in git
+!results/raw/.gitkeep
+!results/aggregated/.gitkeep
+!results/figures/.gitkeep
+!results/logs/.gitkeep
+
+# ─── LaTeX Auxiliary Files ───────────────────────────────────
+*.aux
+*.bbl
+*.bcf
+*.blg
+*.fdb_latexmk
+*.fls
+*.lof
+*.log
+*.lot
+*.out
+*.run.xml
+*.synctex.gz
+*.toc
+
+# ─── OS & IDE Specific ───────────────────────────────────────
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
