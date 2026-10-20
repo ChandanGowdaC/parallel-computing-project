@@ -543,11 +543,25 @@ void BasicSystem::save_results()
         metrics.tasks_finished = num_of_tasks;
         metrics.throughput = (simulation_time > 0) ? ((double)num_of_tasks / simulation_time) : 0.0;
 
+        if (deadline_enabled)
+        {
+            deadline_metrics.populate_run_metrics(metrics);
+        }
+
         if (!csv_metrics_path.empty())
             metrics.append_to_csv(csv_metrics_path);
         if (!json_metrics_path.empty())
             metrics.save_to_json(json_metrics_path);
     }
+
+    if (deadline_enabled)
+    {
+        std::string task_file = tasks_output_csv.empty() ? (outfile + "/deadline_tasks.csv") : tasks_output_csv;
+        deadline_metrics.save_task_records(task_file, task_pool, simulation_time);
+        std::string snap_file = snapshot_output_csv.empty() ? (outfile + "/deadline_snapshots.csv") : snapshot_output_csv;
+        deadline_metrics.save_snapshot_series(snap_file);
+    }
+
     saving_time = (std::clock() - t) / CLOCKS_PER_SEC;
 	if (screen)
 		std::cout << "Done! (" << saving_time << " s)" << std::endl;

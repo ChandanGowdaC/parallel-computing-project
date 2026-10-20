@@ -19,6 +19,12 @@ void KivaSystem::initialize()
 	goal_locations.resize(num_of_drives);
 	paths.resize(num_of_drives);
 	finished_tasks.resize(num_of_drives);
+	if (deadline_enabled)
+	{
+		task_generator = std::make_unique<TaskGenerator>(G.endpoints, seed, task_arrival_rate, deadline_factor);
+		task_scheduler = std::make_unique<DeadlineScheduler>(parse_scheduling_policy(scheduling_policy));
+		agent_active_task.assign(num_of_drives, -1);
+	}
 	bool succ = load_records(); // continue simulating from the records
 	if (!succ)
 	{
@@ -56,6 +62,8 @@ void KivaSystem::initialize_goal_locations()
 {
 	if (hold_endpoints || useDummyPaths)
 		return;
+	if (deadline_enabled)
+		return; // Handled dynamically by TaskGenerator & DeadlineScheduler in update_goal_locations()
 	// Choose random goal locations
 	// Goal locations are not necessarily unique
 	for (int k = 0; k < num_of_drives; k++)
@@ -140,58 +148,108 @@ void KivaSystem::update_goal_locations()
 	}
 	else
 	{
-		for (int k = 0; k < num_of_drives; k++)
+		if (deadline_enabled && task_generator && task_scheduler)
 		{
-			int curr = paths[k][timestep].location; // current location
-			if (useDummyPaths)
+			// 1. Generate new Poisson arrivals for current timestep
+			auto arrivals = task_generator->generate_arrivals(timestep, G.cols, G.rows);
+			for (const auto& t : arrivals)
 			{
-				if (goal_locations[k].empty())
+				task_pool.push_back(t);
+				deadline_metrics.on_task_generated(t);
+			}
+
+			// 2. Identify idle agents needing assignment
+			std::vector<int> idle_agents;
+			std::vector<int> agent_locations(num_of_drives);
+			for (int k = 0; k < num_of_drives; ++k)
+			{
+				agent_locations[k] = paths[k][timestep].location;
+				if (agent_active_task[k] == -1 && goal_locations[k].empty())
 				{
-					goal_locations[k].emplace_back(G.agent_home_locations[k], 0);
-				}
-				if (goal_locations[k].size() == 1)
-				{
-					int next;
-					do {
-						next = G.endpoints[rand() % (int)G.endpoints.size()];
-					} while (next == curr);
-					goal_locations[k].emplace(goal_locations[k].begin(), next, 0);
-					new_agents.emplace_back(k);
+					idle_agents.push_back(k);
 				}
 			}
-			else
+
+			// 3. Assign tasks using configured policy (FIFO, EDF, DEADLINE_AWARE)
+			if (!idle_agents.empty())
 			{
-				pair<int, int> goal; // The last goal location
-				if (goal_locations[k].empty())
+				auto assignments = task_scheduler->assign_tasks(
+					task_pool, idle_agents, agent_locations, timestep, G.cols);
+
+				for (const auto& pair : assignments)
 				{
-					goal = make_pair(curr, 0);
+					int agent_id = pair.first;
+					int task_id = pair.second;
+					agent_active_task[agent_id] = task_id;
+					const auto& t = task_pool[task_id];
+					int curr = paths[agent_id][timestep].location;
+					if (curr != t.pickup_loc)
+					{
+						goal_locations[agent_id].emplace_back(t.pickup_loc, 0);
+					}
+					goal_locations[agent_id].emplace_back(t.delivery_loc, 0);
+				}
+			}
+
+			// 4. Update status of unassigned/active tasks and record snapshot
+			task_scheduler->update_task_statuses(task_pool, timestep);
+			deadline_metrics.snapshot(timestep);
+		}
+		else
+		{
+			for (int k = 0; k < num_of_drives; k++)
+			{
+				int curr = paths[k][timestep].location; // current location
+				if (useDummyPaths)
+				{
+					if (goal_locations[k].empty())
+					{
+						goal_locations[k].emplace_back(G.agent_home_locations[k], 0);
+					}
+					if (goal_locations[k].size() == 1)
+					{
+						int next;
+						do {
+							next = G.endpoints[rand() % (int)G.endpoints.size()];
+						} while (next == curr);
+						goal_locations[k].emplace(goal_locations[k].begin(), next, 0);
+						new_agents.emplace_back(k);
+					}
 				}
 				else
 				{
-					goal = goal_locations[k].back();
-				}
-				double min_timesteps = G.get_Manhattan_distance(goal.first, curr); // G.heuristics.at(goal)[curr];
-				while (min_timesteps <= simulation_window)
-					// The agent might finish its tasks during the next planning horizon
-				{
-					// assign a new task
-					pair<int, int> next;
-					if (G.types[goal.first] == "Endpoint")
+					pair<int, int> goal; // The last goal location
+					if (goal_locations[k].empty())
 					{
-						do
-						{
-							next = make_pair(G.endpoints[rand() % (int)G.endpoints.size()], 0);
-						} while (next == goal);
+						goal = make_pair(curr, 0);
 					}
 					else
 					{
-						std::cout << "ERROR in update_goal_function()" << std::endl;
-						std::cout << "The fiducial type should not be " << G.types[curr] << std::endl;
-						exit(-1);
+						goal = goal_locations[k].back();
 					}
-					goal_locations[k].emplace_back(next);
-					min_timesteps += G.get_Manhattan_distance(next.first, goal.first); // G.heuristics.at(next)[goal];
-					goal = next;
+					double min_timesteps = G.get_Manhattan_distance(goal.first, curr); // G.heuristics.at(goal)[curr];
+					while (min_timesteps <= simulation_window)
+						// The agent might finish its tasks during the next planning horizon
+					{
+						// assign a new task
+						pair<int, int> next;
+						if (G.types[goal.first] == "Endpoint")
+						{
+							do
+							{
+								next = make_pair(G.endpoints[rand() % (int)G.endpoints.size()], 0);
+							} while (next == goal);
+						}
+						else
+						{
+							std::cout << "ERROR in update_goal_function()" << std::endl;
+							std::cout << "The fiducial type should not be " << G.types[curr] << std::endl;
+							exit(-1);
+						}
+						goal_locations[k].emplace_back(next);
+						min_timesteps += G.get_Manhattan_distance(next.first, goal.first); // G.heuristics.at(next)[goal];
+						goal = next;
+					}
 				}
 			}
 		}
@@ -227,6 +285,21 @@ void KivaSystem::simulate(int simulation_time)
 			num_of_tasks++;
 			if (hold_endpoints)
 				held_endpoints.erase(loc);
+
+			if (deadline_enabled && id >= 0 && id < (int)agent_active_task.size())
+			{
+				int tid = agent_active_task[id];
+				if (tid >= 0 && tid < (int)task_pool.size())
+				{
+					if (loc == task_pool[tid].delivery_loc)
+					{
+						task_pool[tid].finish_time = t;
+						task_pool[tid].status = TaskStatus::COMPLETED;
+						deadline_metrics.on_task_completed(task_pool[tid], t);
+						agent_active_task[id] = -1; // marked idle for next replan
+					}
+				}
+			}
 		}
 
 		if (congested())

@@ -43,6 +43,12 @@ void set_parameters(BasicSystem& system, const boost::program_options::variables
 		system.task_arrival_rate = vm["task_arrival_rate"].as<double>();
 	if (vm.count("deadline_factor"))
 		system.deadline_factor = vm["deadline_factor"].as<double>();
+	if (vm.count("policy"))
+		system.scheduling_policy = vm["policy"].as<std::string>();
+	if (vm.count("tasks_csv"))
+		system.tasks_output_csv = vm["tasks_csv"].as<std::string>();
+	if (vm.count("snapshot_csv"))
+		system.snapshot_output_csv = vm["snapshot_csv"].as<std::string>();
 	if (vm.count("csv_metrics"))
 		system.csv_metrics_path = vm["csv_metrics"].as<std::string>();
 	if (vm.count("json_metrics"))
@@ -172,6 +178,9 @@ int main(int argc, char** argv)
 		("deadline", po::value<bool>()->default_value(false), "enable deadline-aware task generation (Person B)")
 		("task_arrival_rate", po::value<double>()->default_value(1.0), "Poisson task arrival rate lambda")
 		("deadline_factor", po::value<double>()->default_value(2.0), "deadline tightness multiplier")
+		("policy", po::value<std::string>()->default_value("EDF"), "scheduling policy (FIFO, EDF, DEADLINE_AWARE)")
+		("tasks_csv", po::value<std::string>()->default_value(""), "path to output per-task records CSV")
+		("snapshot_csv", po::value<std::string>()->default_value(""), "path to output deadline snapshots CSV")
 		("csv_metrics", po::value<std::string>()->default_value(""), "path to output summary CSV (Person D)")
 		("json_metrics", po::value<std::string>()->default_value(""), "path to output summary JSON (Person D)")
 		;

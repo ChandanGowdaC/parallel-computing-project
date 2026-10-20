@@ -54,3 +54,14 @@ add_test(NAME ParallelExecutorTest COMMAND test_parallel_executor)
 add_executable(test_interfaces "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_interfaces.cpp")
 target_link_libraries(test_interfaces PRIVATE Threads::Threads)
 add_test(NAME InterfacesTest COMMAND test_interfaces)
+
+# 4. Person B Deadline Workload test
+add_executable(test_deadline_workload
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_deadline_workload.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/TaskGenerator.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/DeadlineScheduler.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/DeadlineMetrics.cpp"
+)
+target_link_libraries(test_deadline_workload PRIVATE Threads::Threads)
+add_test(NAME DeadlineWorkloadTest COMMAND test_deadline_workload)
+

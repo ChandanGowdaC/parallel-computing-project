@@ -10,6 +10,10 @@
 #include "ThreadPool.h"
 #include "Task.h"
 #include "Metrics.h"
+#include "TaskGenerator.h"
+#include "DeadlineScheduler.h"
+#include "DeadlineMetrics.h"
+#include <memory>
 
 
 class BasicSystem
@@ -42,6 +46,15 @@ public:
     bool deadline_enabled = false;
     double task_arrival_rate = 1.0;
     double deadline_factor = 2.0;
+    std::string scheduling_policy = "EDF";
+    std::string tasks_output_csv = "";
+    std::string snapshot_output_csv = "";
+
+    std::vector<Task> task_pool;
+    std::vector<int> agent_active_task; // agent_id -> task_id (-1 if idle)
+    DeadlineMetrics deadline_metrics;
+    std::unique_ptr<TaskGenerator> task_generator;
+    std::unique_ptr<DeadlineScheduler> task_scheduler;
 
     // Experiment logging (Person D)
     std::string scenario_name = "";
