@@ -29,6 +29,8 @@ void set_parameters(BasicSystem& system, const boost::program_options::variables
 
 	if (vm.count("scenario"))
 		system.scenario_name = vm["scenario"].as<std::string>();
+	if (vm.count("resume"))
+		system.resume = vm["resume"].as<bool>();
 	if (vm.count("threads"))
 		system.num_threads = vm["threads"].as<int>();
 	if (vm.count("parallel"))
@@ -163,6 +165,7 @@ int main(int argc, char** argv)
 		("prioritize_start", po::value<bool>()->default_value(true), "Prioritize waiting at start locations")
 		("suboptimal_bound", po::value<double>()->default_value(1), "Suboptimal bound for ECBS")
 		("log", po::value<bool>()->default_value(false), "save the search trees (and the priority trees)")
+		("resume", po::value<bool>()->default_value(false), "resume simulation from existing paths.txt in output folder")
 		("threads,j", po::value<int>()->default_value(1), "number of worker threads for parallel execution")
 		("parallel", po::value<bool>()->default_value(false), "enable parallel planning (GD-RHCR). When false, runs sequential baseline")
 		("vis_radius,V", po::value<int>()->default_value(5), "visibility/spatial partitioning radius for GD-RHCR")

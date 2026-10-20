@@ -786,6 +786,9 @@ void BasicSystem::initialize_solvers()
 
 bool BasicSystem::load_records()
 {
+	if (!resume)
+		return false;
+
 	boost::char_separator<char> sep1(";");
 	boost::char_separator<char> sep2(",");
 	string line;

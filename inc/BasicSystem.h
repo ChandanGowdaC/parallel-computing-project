@@ -31,6 +31,7 @@ public:
     int simulation_window;
     int planning_window;
     int simulation_time;
+    bool resume = false;
 
     // Infrastructure & Parallel execution (Person A / Person C)
     int num_threads = 1;
