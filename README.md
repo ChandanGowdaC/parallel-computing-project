@@ -16,18 +16,23 @@ An empirical implementation and benchmarking framework for **Group Decentralized
 │   ├── ThreadPool.h               # ThreadPool primitive (progschj/ThreadPool)
 │   ├── ParallelExecutor.h         # Reusable parallel primitive utility (Person A/C)
 │   ├── Task.h                     # Task contract (deadlines, tardiness) (Person B)
+│   ├── TaskGenerator.h            # Poisson arrival & deadline generator (Person B)
+│   ├── DeadlineScheduler.h        # Scheduling policies (FIFO, EDF, Urgency) (Person B)
+│   ├── DeadlineMetrics.h          # Deadline KPIs & snapshot tracker (Person B)
 │   ├── SolverInterface.h          # Solver contract (GroupPlanningTask) (Person A/C)
 │   ├── Metrics.h                  # Metrics contract (CSV/JSON schema) (Person D)
 │   └── ...                        # RHCR core headers
-├── src/                           # RHCR core sources + driver
+├── src/                           # RHCR core sources + TaskGenerator + DeadlineScheduler + driver
 ├── maps/                          # Warehouse maps (kiva.map, sorting grids)
 ├── scripts/
 │   ├── sweep_experiments.py       # Experiment sweeper across threads and agents
-│   └── plot_results.py            # Metrics analysis and speedup plot generator
+│   ├── plot_results.py            # Metrics analysis and speedup plot generator
+│   └── plot_deadline_metrics.py   # Deadline satisfaction & tardiness plotter (Person B/D)
 └── tests/
     ├── test_thread_pool.cpp       # ThreadPool unit & concurrency test
     ├── test_parallel_executor.cpp # ParallelExecutor unit & parallel_map test
-    └── test_interfaces.cpp        # Day One contract validation tests
+    ├── test_interfaces.cpp        # Day One contract validation tests
+    └── test_deadline_workload.cpp # Person B deadline workload & policy test suite
 ```
 
 ---
@@ -123,8 +128,11 @@ Outputs:
 | `--parallel` | | `false` | Enable parallel planning (GD-RHCR). When `false`, runs sequential baseline |
 | `--vis_radius` | `-V` | `5` | Visibility / spatial partitioning radius for GD-RHCR |
 | `--deadline` | | `false` | Enable deadline-aware task generation (Person B) |
-| `--task_arrival_rate` | | `1.0` | Poisson task arrival rate $\lambda$ |
-| `--deadline_factor` | | `2.0` | Deadline tightness multiplier |
+| `--task_arrival_rate` | | `1.0` | Poisson task arrival rate $\lambda$ (tasks/timestep) |
+| `--deadline_factor` | | `2.0` | Deadline tightness multiplier $\alpha \ge 1.0$ |
+| `--policy` | | `EDF` | Task scheduling policy: `FIFO`, `EDF`, `DEADLINE_AWARE` (Person B) |
+| `--tasks_csv` | | `""` | Path for per-task completion records CSV (Person B) |
+| `--snapshot_csv` | | `""` | Path for rolling deadline snapshots time series (Person B) |
 | `--csv_metrics` | | `""` | Destination path for summary CSV row (Person D) |
 | `--json_metrics` | | `""` | Destination path for summary JSON file (Person D) |
 | `--resume` | | `false` | Resume simulation from existing `paths.txt` in output folder |
@@ -133,6 +141,47 @@ Outputs:
 | `--planning_window` | | `INT_MAX/2` | Collision-free horizon $w$ |
 | `--solver` | | `PBS` | Windowed MAPF solver (`ECBS`, `PBS`, `WHCA`, `LRA`) |
 | `--suboptimal_bound` | | `1.0` | Suboptimality factor for ECBS (e.g. 1.5) |
+
+---
+
+## Deadline-Aware Workload & Scheduling (Person B)
+
+Person B implements dynamic, deadline-constrained task generation and real-time scheduling on top of RHCR:
+
+### 1. Workload Generator (`inc/TaskGenerator.h`)
+- **Poisson Arrival Process**: Inter-arrival times drawn from $Exp(\lambda)$, modeling stochastic order arrivals in fulfillment warehouses.
+- **Randomized Deadline Windows**:
+  $$\text{min\_travel} = \text{Manhattan}(p, d)$$
+  $$\text{slack} = \max(\text{min\_slack}, \lceil \alpha \times \text{min\_travel} \rceil)$$
+  $$\text{deadline} = \text{release\_time} + \text{slack}$$
+  where $\alpha =$ `deadline_factor` controls deadline tightness.
+
+### 2. Real-Time Scheduling Policies (`inc/DeadlineScheduler.h`)
+- **FIFO** (First-In-First-Out): Assigns unassigned tasks ordered by `release_time`.
+- **EDF** (Earliest-Deadline-First): Prioritizes tasks with earliest absolute deadlines (optimal single-channel real-time policy).
+- **DEADLINE_AWARE** (Least Slack First / Urgency Score): Computes per-agent urgency accounting for travel distance from current agent location:
+  $$\text{urgency} = (\text{deadline} - t) - (\text{dist}(\text{agent}, \text{pickup}) + \text{dist}(\text{pickup}, \text{delivery}))$$
+  Tasks with minimum remaining slack after estimated travel are scheduled first.
+
+### 3. Performance Metrics & Tracking (`inc/DeadlineMetrics.h`)
+- **Deadline Satisfaction Rate**: $\frac{\text{tasks\_on\_time}}{\text{tasks\_total}}$
+- **Task Tardiness**: $\max(0, \text{finish\_time} - \text{deadline})$ (average and maximum).
+- **Per-Task Record CSV**: `task_id, pickup, delivery, release_time, deadline, finish_time, tardiness, status`.
+- **Time-Series Snapshots**: Rolling completion and deadline satisfaction recorded every simulation window.
+
+### 4. Running & Plotting Deadline Experiments
+```bash
+# Run simulation with deadline-aware workload and EDF policy:
+./run.sh --scenario=KIVA -m maps/kiva.map -k 100 --solver=ECBS \
+  --deadline=1 --task_arrival_rate=2.0 --deadline_factor=1.8 --policy=EDF \
+  --csv_metrics=exp/deadline_results.csv --tasks_csv=exp/tasks.csv --snapshot_csv=exp/snapshots.csv
+
+# Generate deadline analysis plots and summary table:
+python3 scripts/plot_deadline_metrics.py \
+  --metrics-csv exp/deadline_results.csv \
+  --snapshots-csv exp/snapshots.csv \
+  --output-dir exp/plots
+```
 
 ---
 
