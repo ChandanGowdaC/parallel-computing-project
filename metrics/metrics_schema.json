@@ -1,0 +1,76 @@
+{
+  "description": "GD-RHCR Experiment Metrics Schema — Person D defines, Persons B and C write to it.",
+  "version": "1.0.0",
+
+  "run_level_csv": {
+    "filename_pattern": "run_{run_id}.csv",
+    "description": "One row per experiment run. All fields mandatory unless marked optional.",
+    "columns": [
+      { "name": "run_id",              "type": "string",  "description": "Unique run identifier: {map}_{solver}_{agents}_{threads}_{seed}" },
+      { "name": "timestamp",           "type": "string",  "description": "ISO-8601 UTC timestamp when the run started" },
+      { "name": "map_name",            "type": "string",  "description": "Map file used (e.g., kiva, sorting)" },
+      { "name": "scenario",            "type": "string",  "description": "Scenario type: KIVA or SORTING" },
+      { "name": "solver",              "type": "string",  "description": "Solver used: PBS, ECBS, WHCA" },
+      { "name": "solver_mode",         "type": "string",  "description": "sequential or parallel" },
+      { "name": "thread_count",        "type": "int",     "description": "Number of threads used (1 for sequential)" },
+      { "name": "agent_count",         "type": "int",     "description": "Number of agents in the simulation" },
+      { "name": "task_arrival_rate",    "type": "float",   "description": "Poisson lambda for task generation" },
+      { "name": "planning_horizon_h",   "type": "int",     "description": "RHCR replanning interval (timesteps)" },
+      { "name": "planning_window_w",    "type": "int",     "description": "RHCR solver lookahead window (timesteps)" },
+      { "name": "visibility_radius_v",  "type": "float",   "description": "GD-RHCR group partitioning radius (0 = off)", "optional": true },
+      { "name": "seed",                "type": "int",     "description": "Random seed for reproducibility" },
+      { "name": "simulation_timesteps", "type": "int",     "description": "Total simulation timesteps executed" },
+      { "name": "total_runtime_ms",     "type": "float",   "description": "Wall-clock total runtime in milliseconds" },
+      { "name": "solver_runtime_ms",    "type": "float",   "description": "Wall-clock time spent in the solver only" },
+      { "name": "num_replan_episodes",  "type": "int",     "description": "Number of replanning episodes triggered" },
+      { "name": "num_tasks_generated",  "type": "int",     "description": "Total tasks generated during simulation" },
+      { "name": "num_tasks_completed",  "type": "int",     "description": "Total tasks completed during simulation" },
+      { "name": "throughput",           "type": "float",   "description": "Tasks completed per timestep" },
+      { "name": "num_groups",           "type": "int",     "description": "Number of spatial groups (1 for sequential)", "optional": true },
+      { "name": "avg_group_size",       "type": "float",   "description": "Average agents per group", "optional": true },
+      { "name": "max_group_solve_ms",   "type": "float",   "description": "Max solve time across groups per episode", "optional": true },
+      { "name": "num_collisions",       "type": "int",     "description": "Inter-group collision count (post-merge)", "optional": true },
+      { "name": "deadline_satisfaction_rate", "type": "float", "description": "Fraction of tasks completed before deadline" },
+      { "name": "avg_tardiness",        "type": "float",   "description": "Mean tardiness across all overdue tasks (0 if none)" },
+      { "name": "max_tardiness",        "type": "float",   "description": "Maximum tardiness observed" },
+      { "name": "num_tasks_overdue",    "type": "int",     "description": "Count of tasks that missed their deadline" }
+    ]
+  },
+
+  "task_level_csv": {
+    "filename_pattern": "tasks_{run_id}.csv",
+    "description": "One row per task per run. Written by Person B's task tracking module.",
+    "columns": [
+      { "name": "run_id",             "type": "string", "description": "Links back to run_level_csv" },
+      { "name": "task_id",            "type": "int",    "description": "Unique task identifier within the run" },
+      { "name": "release_time",       "type": "int",    "description": "Timestep when the task was generated" },
+      { "name": "deadline",           "type": "int",    "description": "Timestep by which the task should be completed" },
+      { "name": "pickup_x",           "type": "int",    "description": "Pickup location x coordinate" },
+      { "name": "pickup_y",           "type": "int",    "description": "Pickup location y coordinate" },
+      { "name": "delivery_x",         "type": "int",    "description": "Delivery location x coordinate" },
+      { "name": "delivery_y",         "type": "int",    "description": "Delivery location y coordinate" },
+      { "name": "assigned_agent",     "type": "int",    "description": "Agent ID assigned to this task (-1 if unassigned)" },
+      { "name": "completion_time",    "type": "int",    "description": "Timestep when task was completed (-1 if incomplete)" },
+      { "name": "tardiness",          "type": "int",    "description": "max(0, completion_time - deadline); 0 if on time or incomplete" },
+      { "name": "status",             "type": "string", "description": "completed | overdue | in_progress | unassigned" },
+      { "name": "scheduling_policy",  "type": "string", "description": "FIFO | EDF | DEADLINE_AWARE" }
+    ]
+  },
+
+  "episode_level_csv": {
+    "filename_pattern": "episodes_{run_id}.csv",
+    "description": "One row per replanning episode. Written by Person C's parallel core.",
+    "columns": [
+      { "name": "run_id",              "type": "string", "description": "Links back to run_level_csv" },
+      { "name": "episode_id",          "type": "int",    "description": "Replanning episode index (0-based)" },
+      { "name": "timestep",            "type": "int",    "description": "Simulation timestep when this episode started" },
+      { "name": "num_groups",           "type": "int",    "description": "Groups in this episode" },
+      { "name": "group_sizes",          "type": "string", "description": "Comma-separated list of group sizes" },
+      { "name": "solve_time_ms",        "type": "float",  "description": "Total wall-clock solver time for this episode" },
+      { "name": "max_group_solve_ms",   "type": "float",  "description": "Slowest group's solve time" },
+      { "name": "min_group_solve_ms",   "type": "float",  "description": "Fastest group's solve time" },
+      { "name": "merge_time_ms",        "type": "float",  "description": "Time to merge group results" },
+      { "name": "inter_group_collisions","type": "int",   "description": "Collisions detected during merge" }
+    ]
+  }
+}
