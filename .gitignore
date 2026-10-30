@@ -1,0 +1,28 @@
+# Build artifacts
+build/
+bin/
+Debug/
+Release/
+*.o
+*.obj
+*.exe
+*.out
+*.app
+*.dSYM/
+
+# IDE and Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Experiment output
+exp/
+experiments/
+
+# Visual Studio files
+lifelong.vcxproj
+lifelong.vcxproj.filters
+lifelong.vcxproj.user

@@ -1,0 +1,50 @@
+name: CI Build & Smoke Test
+
+on:
+  push:
+    branches: [ "**" ]
+  pull_request:
+    branches: [ "**" ]
+
+jobs:
+  build-and-test:
+    name: Build & Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install Dependencies (Ubuntu)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake build-essential libboost-all-dev
+
+      - name: Install Dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install boost cmake
+
+      - name: Build Project
+        run: |
+          chmod +x build.sh run.sh
+          ./build.sh
+
+      - name: Run All Unit & Interface Tests
+        run: |
+          ./run.sh test
+
+      - name: Run Sequential Baseline Smoke Test
+        run: |
+          ./run.sh --scenario=KIVA -m maps/kiva.map -k 20 --simulation_window=1 --solver=ECBS --suboptimal_bound=1.5 --dummy_paths=1 --seed=0 --simulation_time=5 -o exp/ci_test --csv_metrics=exp/ci_metrics.csv
+          cat exp/ci_metrics.csv
+
+      - name: Verify Experiment Sweep & Plotting Pipeline
+        run: |
+          python3 scripts/sweep_experiments.py --smoke
+          python3 scripts/plot_results.py

@@ -1,0 +1,5 @@
+build/
+exp/
+.git/
+.DS_Store
+*.dSYM/
