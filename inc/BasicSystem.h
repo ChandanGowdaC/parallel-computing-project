@@ -55,6 +55,7 @@ public:
     bool deadline_enabled = false;
     double task_arrival_rate = 1.0;
     double deadline_factor = 2.0;
+    int deadline_slack_c = 0;
     std::string scheduling_policy = "EDF";
     std::string tasks_output_csv = "";
     std::string snapshot_output_csv = "";
@@ -104,8 +105,8 @@ public:
     std::chrono::high_resolution_clock::time_point sim_start_time;
 
     // params for drive model
-    bool consider_rotation;
-    int k_robust;
+    bool consider_rotation = false;
+    int k_robust = 0;
 
     BasicSystem(const BasicGraph& G, MAPFSolver& solver);
     ~BasicSystem();

@@ -70,6 +70,8 @@ void set_parameters(BasicSystem& system, const BasicGraph& G, const boost::progr
 		system.task_arrival_rate = vm["task_arrival_rate"].as<double>();
 	if (vm.count("deadline_factor"))
 		system.deadline_factor = vm["deadline_factor"].as<double>();
+	if (vm.count("deadline_slack_c"))
+		system.deadline_slack_c = vm["deadline_slack_c"].as<int>();
 
 	if (vm.count("scheduling_policy"))
 		system.scheduling_policy = vm["scheduling_policy"].as<std::string>();
@@ -249,6 +251,7 @@ int main(int argc, char** argv)
 		("deadline", po::value<bool>()->default_value(false)->implicit_value(true), "enable deadline-aware task generation (Person B)")
 		("task_arrival_rate", po::value<double>()->default_value(1.0), "Poisson task arrival rate lambda")
 		("deadline_factor", po::value<double>()->default_value(2.0), "deadline tightness multiplier")
+		("deadline_slack_c", po::value<int>()->default_value(0), "additive slack constant c in deadline = release + k*dist + c")
 		("policy", po::value<std::string>()->default_value("EDF"), "scheduling policy (FIFO, EDF, DEADLINE_AWARE)")
 		("scheduling_policy", po::value<std::string>(), "scheduling policy (alias for policy)")
 		("run_id", po::value<std::string>()->default_value(""), "unique experiment run id (Person D)")

@@ -1,6 +1,34 @@
 # Parallel Computing Project: Lifelong MAPF & GD-RHCR
 
-An empirical implementation and benchmarking framework for **Group Decentralized Rolling-Horizon Collision Resolution (GD-RHCR)** and deadline-aware lifelong Multi-Agent Path Finding (MAPF), built on the foundation of Jiaoyang Li et al.'s [RHCR](https://github.com/Jiaoyang-Li/RHCR) engine.
+An empirical implementation, microarchitectural evaluation, and benchmarking framework for **Group Decentralized Rolling-Horizon Collision Resolution (GD-RHCR)** (arXiv 2608.17928) and deadline-aware lifelong Multi-Agent Path Finding (MAPF), built on the foundation of Jiaoyang Li et al.'s [RHCR](https://github.com/Jiaoyang-Li/RHCR) engine.
+
+---
+
+## Fast Reproduction Target (`make reproduce-small`)
+
+To reproduce the key experimental findings in under 15 seconds:
+
+```bash
+make reproduce-small
+```
+
+This target:
+1. Builds the release binary `./build/lifelong`.
+2. Runs 3 pre-registered seeds (`42, 100, 2026`) with $N=100$ agents on the tiled KIVA warehouse layout for the full evaluation horizon ($T_{\mathrm{sim}} = 250$ timesteps, 50 replanning cycles, planning window $w=10$, planning horizon $h=5$).
+3. Executes sequential baseline $V_0$, single-threaded decentralized $V_1$ ($V^*=1$), and 4-threaded parallel $V_2$ ($V^*=1, p=4$).
+4. Invokes the independent collision verifier (`scripts/verify_collision_freedom.py`), verifying 0 collisions across all agents and all timesteps.
+5. Prints the speedup breakdown ($S_{\mathrm{alg}}$, $S_{\mathrm{thread}}$, $S_{\mathrm{total}}$) and plan-quality throughput parity.
+6. Execution time: **$\approx 10$ seconds** (well within the $< 2$ minute requirement).
+
+---
+
+## Documentation & Evaluation Package
+
+- **[docs/SCORECARD.md](docs/SCORECARD.md)**: Metrics scorecard covering Groups A–E, exact Graham-Brent bounds verification, Karp-Flatt metrics, and regime map.
+- **[docs/EVALUATION_REPORT.md](docs/EVALUATION_REPORT.md)**: Complete evaluation report: *When does group-decentralized parallel MAPF pay off on warehouse workloads?*
+- **[docs/PRESENTATION_OUTLINE.md](docs/PRESENTATION_OUTLINE.md)**: 10-slide presentation deck outline with speaker notes and defense Q&A.
+- **[docs/DECISIONS.md](docs/DECISIONS.md)**: Complete architecture and methodology decision log (D-001 through D-020).
+- **`results/figures/`**: Publication-quality figures (PNG and PDF vector format).
 
 ---
 

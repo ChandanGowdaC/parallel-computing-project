@@ -40,7 +40,8 @@ public:
                   int seed,
                   double arrival_rate,
                   double deadline_factor,
-                  int min_deadline_slack = 10);
+                  int min_deadline_slack = 10,
+                  int deadline_slack_c = 0);
 
     /**
      * Generate all tasks that arrive at simulation timestep `t`.
@@ -79,6 +80,7 @@ public:
     // Accessors
     double get_arrival_rate()    const { return arrival_rate_; }
     double get_deadline_factor() const { return deadline_factor_; }
+    int    get_deadline_slack_c() const { return deadline_slack_c_; }
     int    get_tasks_generated() const { return next_task_id_; }
 
     void set_zoning(bool enabled, double cross_zone_prob, int tile_h, int tile_w, int map_width, int map_height);
@@ -89,6 +91,7 @@ private:
     double           arrival_rate_;
     double           deadline_factor_;
     int              min_deadline_slack_;
+    int              deadline_slack_c_ = 0;
 
     // Task zoning
     bool task_zoning_ = false;

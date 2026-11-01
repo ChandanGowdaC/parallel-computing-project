@@ -31,12 +31,14 @@ TaskGenerator::TaskGenerator(const std::vector<int>& endpoints,
                              int seed,
                              double arrival_rate,
                              double deadline_factor,
-                             int min_deadline_slack)
+                             int min_deadline_slack,
+                             int deadline_slack_c)
     : endpoints_(endpoints),
       seed_(seed),
       arrival_rate_(arrival_rate),
       deadline_factor_(deadline_factor),
       min_deadline_slack_(min_deadline_slack),
+      deadline_slack_c_(deadline_slack_c),
       rng_(seed),
       inter_arrival_dist_(arrival_rate > 0.0 ? arrival_rate : 1.0),
       endpoint_dist_(0, static_cast<int>(endpoints.size()) - 1)
@@ -199,9 +201,11 @@ Task TaskGenerator::make_task(int release_time, int map_width, int /*map_height*
 
     // Compute minimum feasible travel time as Manhattan distance
     int min_travel = manhattan_distance(pickup, delivery, map_width);
-    // Add pickup-to-delivery plus some buffer for congestion
-    int slack = std::max(min_deadline_slack_,
-                         static_cast<int>(std::ceil(deadline_factor_ * min_travel)));
+    // Deadline formula: release + k * shortest_path_dist + c
+    int slack = static_cast<int>(std::ceil(deadline_factor_ * min_travel)) + deadline_slack_c_;
+    if (deadline_slack_c_ == 0 && slack < min_deadline_slack_) {
+        slack = min_deadline_slack_;
+    }
     int deadline = release_time + slack;
 
     Task t(next_task_id_++, pickup, delivery, release_time, deadline);

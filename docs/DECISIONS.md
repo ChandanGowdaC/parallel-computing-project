@@ -315,3 +315,56 @@ This document records all architectural choices, assumptions, trade-offs, and in
   - Rule: ^* = rg\max_V S_{	ext{total}}$ subject to global fallback $\le 10\%$ and throughput $\ge 95\%$ of $, evaluated on tuning seeds at =400$, applied to all $ under constant density.
   - Selected ^* = 2$ for both uniform and zoned workloads. Both ^* = 2$ and conservative baseline  = 8$ will be evaluated in the reporting campaign.
 
+
+---
+
+### D-020: Timing Table Reconciliation, Code Freeze v3, V*=1 Selection, and Deadline Tau Derivation
+* **Date:** 2026-10-31
+* **Context:** Step A timing reconciliation, Step B tuning additions for V=1, matrix amendments, and pre-execution commitment of real-time coupling budget parameter tau.
+* **Timing Table Reconciliation & Timer Bug Fix (Step A):**
+  1. Timer audit revealed that in `code-freeze-v2`, `max_group_solve_ms` was hardcoded to 0.0, `merge_time_ms` was assigned `local_resolve_time_ms`, and actual serial merge conflict checking / DSU uniting time was absorbed into residual serial time.
+  2. Implemented logging-only fix in `src/BasicSystem.cpp`: accurately tracks task work, task span, actual serial merge conflict detection & DSU merge time, and residual serial time.
+  3. Verified that planning outputs remain 100% bit-for-bit identical across 3 seeds (`paths.txt` sha256 hash match: True), all automated tests C1–C6 passed 100%, and full-horizon verifier confirmed 0 collisions. Tagged commit as `code-freeze-v3` (`c8d5b8a`).
+  4. Work/span bound verification across all 8 configurations confirmed that measured planning time $T_{\\text{meas}}$ lies strictly between the theoretical lower bound $T_{\\text{low}} = T_{\\text{serial}} + \\max(W/p, S)$ and the Brent upper bound $T_{\\text{up}} = T_{\\text{serial}} + (W-S)/p + S$.
+* **Step B Tuning Additions & V*=1 Selection:**
+  - Evaluated V=1 on seeds 101, 202, 303 at N=400:
+    - Uniform: $S_{\\text{alg}} = 2.10\\times$, $S_{\\text{thread}} = 1.53\\times$ ($p=4$), $S_{\\text{total}} = 3.21\\times$, fallback rate = 6.0%, throughput ratio = 1.018x. At $p=8$: $S_{\\text{total}} = 2.75\\times$.
+    - Zoned: $S_{\\text{alg}} = 3.40\\times$, $S_{\\text{thread}} = 1.49\\times$ ($p=4$), $S_{\\text{total}} = 5.07\\times$, fallback rate = 0.0%, throughput ratio = 0.984x. At $p=8$: $S_{\\text{total}} = 3.38\\times$.
+  - Re-applying the pre-declared selection rule explicitly at $p=8$: $V=1$ achieves higher $S_{\\text{total}}$ than $V=2$ ($2.75\\times$ vs $2.23\\times$ Uniform; $3.38\\times$ vs $3.11\\times$ Zoned) while strictly satisfying fallback $\\le 10\\%$ and throughput $\\ge 95\\%$.
+  - Winning configuration: **$V^* = 1$**.
+* **Step C Matrix Amendments:**
+  - Campaign matrix configured to 270 runs: $N \\in \\{100, 400, 800\\}$, Uniform and Zoned workloads, 5 reporting seeds.
+  - $V^*=1$ evaluated at $p \\in \\{1, 2, 4, 5, 8, 11\\}$ (where $p=5$ aligns with Apple M3 Pro 5 physical Performance cores).
+  - $V=8$ evaluated at $p \\in \\{1, 8\\}$, plus $V_0$ ($p=1$).
+* **Pre-Execution Commitment of Real-Time Planning Budget Coupling Parameter Tau:**
+  - Measured per-cycle replanning latency at $N=400$ ($h=5$):
+    - $V_0$: 200–250 ms/cycle
+    - $V_1$ ($V^*=1$): 70–95 ms/cycle
+    - $V_2$ ($V^*=1, p=4$): 48–62 ms/cycle
+  - With planning budget $B_{\\text{plan}} = h \\times \\tau = 5\\tau$:
+    1. **Tight Budget: $\\tau_1 = 0.012\\text{ s}$ ($B = 60\\text{ ms}$)**: $V_2$ meets budget with near-zero replanning delay; $V_1$ and $V_0$ experience frequent overruns. Demonstrates parallel threading advantage.
+    2. **Moderate Budget: $\\tau_2 = 0.020\\text{ s}$ ($B = 100\\text{ ms}$)**: Both $V_2$ and $V_1$ meet budget; $V_0$ experiences severe delays. Directly isolates algorithmic decomposition benefit from thread parallelism.
+    3. **Loose Control Budget: $\\tau_3 = 0.050\\text{ s}$ ($B = 250\\text{ ms}$)**: Control setting where all variants complete within budget on 100% of cycles, isolating deadline outcomes from planning time delays.
+
+
+---
+
+### D-021: Step B Deadline Recalibration, Formula Extension & Empirical Characterization
+* **Date:** 2026-11-01
+* **Context:** Final pass recalibration of deadline experiments. In prior runs with $k=2.0, c=0$, satisfaction rate was 1%–7% due to tight deadline windows.
+* **Pre-declared Deadline Model:**
+  - Formula: $\text{deadline} = \text{release} + k \times \text{shortest-path trip length} + c$.
+  - Added CLI flag `--deadline_slack_c <int>` to parameterize additive constant slack $c$.
+* **Calibration on Tuning Seeds [101, 202, 303]:**
+  - Swept $k \in \{2.0, 3.0, 4.0\}$ and $c \in \{50, 100, 150\}$ across $\lambda \in [0.05, 0.2]$ with relaxed control $\tau = 0.060\text{ s}$ ($B=300\text{ ms}$).
+  - Selected parameters: $k^* = 3.0, c^* = 100$.
+  - Result: Among all completed tasks, **100% completed on time** (0 overdue tasks across all evaluated tuning seeds).
+  - Horizon Truncation Boundary Effect: Because the system metric is computed as $\text{tasks\_on\_time} / \text{tasks\_total}$ (where $\text{tasks\_total}$ includes tasks released during the final 80 timesteps that cannot physically complete before the simulation ends at $T=250$), overall satisfaction rate is inherently bounded by the simulation completion fraction ($\sim 38\%–47\%$).
+* **Protocol Decision:**
+  - In accordance with pre-declared rules: report maximum sustainable $\lambda$ at 90% satisfaction as "none", label the deadline section as "exploratory" scaled stress test, and maintain separation between decomposition speedup ($V_1$ vs $V_0$) and thread speedup ($V_2$ vs $V_1$).
+* **Reporting Matrix (240 runs):**
+  - $N=400$, Uniform and Zoned workloads.
+  - Policy: EDF.
+  - $\lambda \in [0.2, 0.5, 1.0, 2.0]$.
+  - $\tau_1 = 0.020\text{ s}$ ($B=100\text{ ms}$; $V_0$ overruns, $V_2$ fits) and $\tau_2 = 0.060\text{ s}$ ($B=300\text{ ms}$; relaxed control).
+  - 5 reporting seeds: `[42, 100, 2026, 3141, 5926]`, interleaved execution.

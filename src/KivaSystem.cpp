@@ -21,7 +21,7 @@ void KivaSystem::initialize()
 	finished_tasks.resize(num_of_drives);
 	if (deadline_enabled)
 	{
-		task_generator = std::make_unique<TaskGenerator>(G.endpoints, seed, task_arrival_rate, deadline_factor);
+		task_generator = std::make_unique<TaskGenerator>(G.endpoints, seed, task_arrival_rate, deadline_factor, 10, deadline_slack_c);
 		if (task_zoning) {
 			int th = (G.rows >= 33 && (G.rows % 33 == 0)) ? 33 : G.rows;
 			int tw = (G.cols >= 46 && (G.cols % 46 == 0)) ? 46 : G.cols;
