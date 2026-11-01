@@ -45,6 +45,12 @@ public:
     bool parallel = false;
     int vis_radius = 5;
 
+    // Task zoning configuration
+    bool task_zoning = false;
+    double cross_zone_prob = 0.05;
+    double total_trip_length = 0.0;
+    long long total_trips_sampled = 0;
+
     // Deadline-aware workload configuration (Person B)
     bool deadline_enabled = false;
     double task_arrival_rate = 1.0;

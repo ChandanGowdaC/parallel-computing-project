@@ -22,6 +22,11 @@ void KivaSystem::initialize()
 	if (deadline_enabled)
 	{
 		task_generator = std::make_unique<TaskGenerator>(G.endpoints, seed, task_arrival_rate, deadline_factor);
+		if (task_zoning) {
+			int th = (G.rows >= 33 && (G.rows % 33 == 0)) ? 33 : G.rows;
+			int tw = (G.cols >= 46 && (G.cols % 46 == 0)) ? 46 : G.cols;
+			task_generator->set_zoning(true, cross_zone_prob, th, tw, G.cols, G.rows);
+		}
 		task_scheduler = std::make_unique<DeadlineScheduler>(parse_scheduling_policy(scheduling_policy));
 		agent_active_task.assign(num_of_drives, -1);
 	}
@@ -34,9 +39,103 @@ void KivaSystem::initialize()
 		{
 			cout << "Randomly generating initial locations" << endl;
 			initialize_start_locations();
+			init_zones();
 			initialize_goal_locations();
 		}
+		else
+		{
+			init_zones();
+		}
 	}
+	else
+	{
+		init_zones();
+	}
+}
+
+void KivaSystem::init_zones()
+{
+	tile_h = (G.rows >= 33 && (G.rows % 33 == 0)) ? 33 : G.rows;
+	tile_w = (G.cols >= 46 && (G.cols % 46 == 0)) ? 46 : G.cols;
+	num_zones_c = std::max(1, G.cols / tile_w);
+	int num_zones_r = std::max(1, G.rows / tile_h);
+	total_zones = std::max(1, num_zones_r * num_zones_c);
+
+	zone_endpoints.assign(total_zones, std::vector<int>());
+	other_zone_endpoints.assign(total_zones, std::vector<int>());
+
+	for (int ep : G.endpoints) {
+		int zid = get_location_zone(ep);
+		if (zid >= 0 && zid < total_zones) {
+			zone_endpoints[zid].push_back(ep);
+		}
+	}
+
+	for (int z = 0; z < total_zones; ++z) {
+		for (int ep : G.endpoints) {
+			int zid = get_location_zone(ep);
+			if (zid != z) {
+				other_zone_endpoints[z].push_back(ep);
+			}
+		}
+	}
+
+	agent_home_zone.assign(num_of_drives, 0);
+	for (int k = 0; k < num_of_drives; ++k) {
+		int loc = starts[k].location;
+		agent_home_zone[k] = get_location_zone(loc);
+	}
+}
+
+int KivaSystem::get_location_zone(int loc) const
+{
+	if (loc < 0 || loc >= G.size() || G.cols <= 0 || tile_h <= 0 || tile_w <= 0) return 0;
+	int r = loc / G.cols;
+	int c = loc % G.cols;
+	int zr = r / tile_h;
+	int zc = c / tile_w;
+	int zid = zr * num_zones_c + zc;
+	if (zid < 0 || zid >= total_zones) return 0;
+	return zid;
+}
+
+int KivaSystem::sample_zoned_endpoint(int agent_id, int current_loc)
+{
+	if (!task_zoning || total_zones <= 1) {
+		int next = G.endpoints[rand() % (int)G.endpoints.size()];
+		while (next == current_loc && G.endpoints.size() > 1) {
+			next = G.endpoints[rand() % (int)G.endpoints.size()];
+		}
+		return next;
+	}
+
+	int hz = (agent_id >= 0 && agent_id < (int)agent_home_zone.size()) ? agent_home_zone[agent_id] : 0;
+	double p = static_cast<double>(rand()) / static_cast<double>(RAND_MAX);
+	bool use_home = (p >= cross_zone_prob);
+
+	if (use_home && !zone_endpoints[hz].empty()) {
+		int next = zone_endpoints[hz][rand() % zone_endpoints[hz].size()];
+		int tries = 0;
+		while (next == current_loc && zone_endpoints[hz].size() > 1 && tries < 50) {
+			next = zone_endpoints[hz][rand() % zone_endpoints[hz].size()];
+			tries++;
+		}
+		return next;
+	} else if (!other_zone_endpoints[hz].empty()) {
+		int next = other_zone_endpoints[hz][rand() % other_zone_endpoints[hz].size()];
+		int tries = 0;
+		while (next == current_loc && other_zone_endpoints[hz].size() > 1 && tries < 50) {
+			next = other_zone_endpoints[hz][rand() % other_zone_endpoints[hz].size()];
+			tries++;
+		}
+		return next;
+	}
+
+	int next = G.endpoints[rand() % (int)G.endpoints.size()];
+	while (next == current_loc && G.endpoints.size() > 1) {
+		next = G.endpoints[rand() % (int)G.endpoints.size()];
+	}
+	return next;
 }
 
 void KivaSystem::initialize_start_locations()
@@ -81,8 +180,10 @@ void KivaSystem::initialize_goal_locations()
 	// Goal locations are not necessarily unique
 	for (int k = 0; k < num_of_drives; k++)
 	{
-		int goal = G.endpoints[rand() % (int)G.endpoints.size()];
+		int goal = sample_zoned_endpoint(k, starts[k].location);
 		goal_locations[k].emplace_back(goal, 0);
+		total_trip_length += G.get_Manhattan_distance(starts[k].location, goal);
+		total_trips_sampled++;
 	}
 }
 
@@ -100,13 +201,15 @@ void KivaSystem::update_goal_locations()
 			int curr = paths[k][timestep].location; // current location
 			if (goal_locations[k].empty())
 			{
-				int next = G.endpoints[rand() % (int)G.endpoints.size()];
+				int next = sample_zoned_endpoint(k, curr);
 				while (next == curr || held_endpoints.find(next) != held_endpoints.end())
 				{
-					next = G.endpoints[rand() % (int)G.endpoints.size()];
+					next = sample_zoned_endpoint(k, curr);
 				}
 				goal_locations[k].emplace_back(next, 0);
 				held_endpoints.insert(next);
+				total_trip_length += G.get_Manhattan_distance(curr, next);
+				total_trips_sampled++;
 			}
 			if (paths[k].back().location == goal_locations[k].back().first &&  // agent already has paths to its goal location
 				paths[k].back().timestep >= goal_locations[k].back().second) // after its release time
@@ -257,10 +360,7 @@ void KivaSystem::update_goal_locations()
 						pair<int, int> next;
 						if (G.types[goal.first] == "Endpoint" || G.types[goal.first] == "Home" || G.types[goal.first] == "Travel")
 						{
-							do
-							{
-								next = make_pair(G.endpoints[rand() % (int)G.endpoints.size()], 0);
-							} while (next == goal);
+							next = make_pair(sample_zoned_endpoint(k, goal.first), 0);
 						}
 						else
 						{
@@ -269,7 +369,10 @@ void KivaSystem::update_goal_locations()
 							exit(-1);
 						}
 						goal_locations[k].emplace_back(next);
-						min_timesteps += G.get_Manhattan_distance(next.first, goal.first); // G.heuristics.at(next)[goal];
+						int trip_dist = G.get_Manhattan_distance(next.first, goal.first);
+						total_trip_length += trip_dist;
+						total_trips_sampled++;
+						min_timesteps += trip_dist;
 						goal = next;
 					}
 				}
@@ -336,6 +439,9 @@ void KivaSystem::simulate(int simulation_time)
 	}
 
 	update_start_locations();
+	double mean_trip_len = total_trips_sampled > 0 ? (total_trip_length / total_trips_sampled) : 0.0;
+	std::cout << "[TripMetrics] Total trips sampled: " << total_trips_sampled
+	          << ", Mean trip length: " << mean_trip_len << std::endl;
 	std::cout << std::endl << "Done!" << std::endl;
 	save_results();
 }

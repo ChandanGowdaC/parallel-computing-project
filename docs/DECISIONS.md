@@ -231,3 +231,87 @@ This document records all architectural choices, assumptions, trade-offs, and in
      - Verified deterministic equivalence (C1), collision-free verifier (C2), ThreadSanitizer & AddressSanitizer cleanliness at 2, 4, 8 threads (C3), group partitioning logic (C4), task accounting (C5), and bit-for-bit reproducibility (C6).
      - Tagged commit as code-freeze-v2.
 
+
+---
+
+### D-016: Zoned Workload Generator & Spatial Trip Characterization
+* **Date:** 2026-10-31
+* **Context:** In large warehouse environments, unconstrained (uniform) destination sampling causes agents to take long cross-facility trips across the entire map, leading to extensive spatial boundary crossings and group percolation.
+* **Mechanism:**
+  - Implemented CLI options `--task_zoning on|off` (default: `off`) and `--cross_zone_prob <double>` (default: 0.05).
+  - Tiled warehouse partitions the map into physical tiles (e.g.  	imes 46$ cells per unit warehouse zone).
+  - When enabled, agents are assigned to a home zone based on initial location. Destination and pickup locations are sampled within the home zone with probability $, and from other warehouse zones with probability $	ext{cross_zone_prob}$.
+* **Empirical Trip Length Verification (seeds 42, 100, 2026):**
+  - =50$ (1x1 tile): Uniform = 28.55 (median 27.85) vs Zoned = 28.55 (median 27.85) (identical on single-tile facility)
+  - =100$ (2x1 tiles): Uniform = 40.85 (median 41.16) vs Zoned = 28.54 (median 28.08)
+  - =200$ (2x2 tiles): Uniform = 54.55 (median 54.73) vs Zoned = 29.97 (median 29.83)
+  - =400$ (4x2 tiles): Uniform = 76.65 (median 76.95) vs Zoned = 30.88 (median 30.98)
+  - =800$ (4x4 tiles): Uniform = 105.47 (median 104.37) vs Zoned = 32.18 (median 33.13)
+* **Finding:** Zoned task assignment successfully decouples trip length from warehouse scale, preserving local spatial clustering as $ grows.
+
+
+---
+
+### D-017: Sparse Regime Empirical Benchmark & Regime Boundary
+* **Date:** 2026-10-31
+* **Context:** Empirical validation of GD-RHCR on open-floor sorting center map (maps/sorting_map.grid, 77x37, 2,125 walkable cells) across 220 full-horizon runs (T_sim = 250, 50 replan cycles, 5 reporting seeds: [42, 100, 2026, 3141, 5926]).
+* **Empirical Findings:**
+  1. **Sparse Non-Percolating Regime (N in {25, 50}, density 1.2% - 2.4%, V=6):**
+     - Mean group count: 16.0 to 20.8 groups per cycle.
+     - Largest group fraction: 18.2% to 21.4% (max group size <= 11 agents).
+     - Global fallback rate: **0.0%** (zero fallbacks across all 50 replanning cycles).
+     - Algorithmic speedup (V0/V1): **1.870x** (N=25) to **2.396x** (N=50).
+     - Pure parallel speedup (V2/V1): **1.583x** (N=25, p=4) and **1.566x** (N=50, p=4).
+     - Overall speedup vs vanilla RHCR (V0):
+       - N=25: **3.019x [2.808, 3.157]** at p=4 (solver time reduced from 29.70 ms to 9.93 ms).
+       - N=50: **3.487x [2.956, 3.607]** at p=2; **3.806x [3.334, 4.083]** at p=4 (solver time reduced from 88.22 ms to 25.12 ms).
+     - Throughput parity: 0.998x to 1.000x vs V0.
+  2. **Moderate Density Regime (N=100, density 4.7%, V=6):**
+     - Mean group count: 15.1 groups; largest group fraction: 44.2%.
+     - Fallback rate: **0.0%**.
+     - Speedup vs V0: **2.095x [2.005, 2.791]** at p=2; **2.016x [1.933, 2.482]** at p=4.
+  3. **Percolation Regime (N=200 or V=10):**
+     - At N=200 (density 9.4%) or V=10, the largest group holds >94% of agents, percolation eliminates parallelism, and speedup converges to ~1.0x.
+* **Conclusion:** Conclusively demonstrates that GD-RHCR delivers up to **3.81x parallel speedup** in sparse warehouse environments where agent density is below the percolation threshold (density <= 5%).
+
+
+---
+
+### D-018: Step 4 Probe Results & Go/No-Go Gate Decision
+* **Date:** 2026-10-31
+* **Context:** Evaluation of Step 4 probe matrix on tiled KIVA warehouse (N=400, maps/tiled/kiva_4x2.map, 132x92) across 54 runs (T_sim = 250, tuning seeds [101, 202, 303], V in {3, 4, 5, 8}, p in {1, 8}).
+* **Measured Empirical Results (median and 95% bootstrap CIs):**
+  - **Uniform Workload:**
+    - V=3, p=8: Speedup vs V0 = **1.568x [1.454, 1.616]**, Fallback rate = **0.0% [0.0%, 2.0%]**, Throughput ratio = **1.007x [1.006, 1.008]**, Largest group fraction = 41.7%.
+    - V=4, p=8: Speedup vs V0 = 1.046x [1.035, 1.134], Fallback rate = 0.0%, Throughput ratio = 0.995x.
+    - V=5, p=8: Speedup vs V0 = 0.894x [0.773, 0.929], Fallback rate = 0.0%, Throughput ratio = 1.012x.
+    - V=8, p=8: Speedup vs V0 = 0.613x [0.594, 0.629], Fallback rate = 0.0%, Throughput ratio = 1.021x.
+  - **Zoned Workload (cross_zone_prob = 0.05):**
+    - V=3, p=8: Speedup vs V0 = **2.616x [2.425, 2.876]**, Fallback rate = **0.0%**, Throughput ratio = **0.983x [0.976, 1.016]**, Largest group fraction = 20.9% (solver time: 4,714.8 ms vs V0 12,559.8 ms).
+    - V=4, p=8: Speedup vs V0 = **2.266x [2.170, 2.476]**, Fallback rate = **0.0%**, Throughput ratio = **0.992x [0.987, 0.997]**, Largest group fraction = 26.0%.
+    - V=5, p=8: Speedup vs V0 = **1.891x [1.773, 2.198]**, Fallback rate = **0.0%**, Throughput ratio = **0.984x**, Largest group fraction = 33.4%.
+    - V=8, p=8: Speedup vs V0 = 0.981x [0.874, 1.177], Fallback rate = 0.0%, Throughput ratio = 0.987x.
+* **Gate Evaluation:**
+  - Criteria: Any configuration with speedup >= 1.5x at p=8 vs V0, throughput >= 95%, and fallback rate <= 10%.
+  - Both Uniform (V=3: 1.568x) and Zoned (V=3: 2.616x, V=4: 2.266x, V=5: 1.891x) satisfy all criteria with 0.0% global fallbacks.
+  - Gate status: **GO**.
+
+
+---
+
+### D-019: Work/Span Bound Characterization, Code Audit & V* Selection
+* **Date:** 2026-10-31
+* **Context:** Analysis of Step 1 work/span bounds, Step 2 V=2 probe, and pre-declared V* selection rule for constant-density scaling.
+* **Code Audit Confirmation:**
+  1. Largest-first group dispatch: confirmed in `src/BasicSystem.cpp` (lines 1030–1032 for initial dispatch; lines 1157–1160 for local re-solves).
+  2. Parallel execution of local re-solves: confirmed in `src/BasicSystem.cpp` (line 1164, calling `parallel_executor->parallel_map_timed`).
+* **Work/Span Analysis:**
+  - Ratio of measured $ solver time to Graham-Brent work/span bound ( pprox (T_1 - T_\infty)/8 + T_\infty + T_{	ext{serial}}$) is /bin/zsh.81	imes$ to .33	imes$ across all evaluated configurations.
+  - Per integration directive rule, since measured runtime is within .3	imes$ of the bound, the bound is the finding and no code change is warranted. Tag remains `code-freeze-v2`.
+* **V=2 Tuning Probe (Seeds 101, 202, 303 at N=400):**
+  - Uniform: {	ext{alg}} = 1.85	imes$, {	ext{thread}} = 1.41	imes$ (=4$), {	ext{total}} = 2.46	imes$, fallback rate = 0.0%, throughput = 1.007x.
+  - Zoned: {	ext{alg}} = 3.09	imes$, {	ext{thread}} = 1.37	imes$ (=4$), {	ext{total}} = 4.25	imes$, fallback rate = 0.0%, throughput = 0.973x.
+* **V* Selection Rule & Commitment:**
+  - Rule: ^* = rg\max_V S_{	ext{total}}$ subject to global fallback $\le 10\%$ and throughput $\ge 95\%$ of $, evaluated on tuning seeds at =400$, applied to all $ under constant density.
+  - Selected ^* = 2$ for both uniform and zoned workloads. Both ^* = 2$ and conservative baseline  = 8$ will be evaluated in the reporting campaign.
+

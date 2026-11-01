@@ -1042,6 +1042,20 @@ void BasicSystem::solve_gd_rhcr()
     double t_solve_wall_ms = pstats.wall_time_ms;
     double t_barrier_wait_ms = pstats.barrier_wait_ms;
 
+    // Track initial task work and span
+    double work_init_ms = 0.0;
+    double span_init_ms = 0.0;
+    double min_group_ms = results.empty() ? 0.0 : 1e9;
+    for (const auto& r : results) {
+        double rt_ms = r.runtime * 1000.0;
+        work_init_ms += rt_ms;
+        span_init_ms = std::max(span_init_ms, rt_ms);
+        min_group_ms = std::min(min_group_ms, rt_ms);
+    }
+    double total_work_ms = work_init_ms;
+    double total_span_ms = span_init_ms;
+    size_t total_tasks_executed = tasks.size();
+
     // Track initial worker busy times
     for (const auto& r : results) {
         int wid = r.worker_id;
@@ -1082,11 +1096,15 @@ void BasicSystem::solve_gd_rhcr()
         }
     }
 
-    // 6. Check initial conflicts
+    // 6. Check initial conflicts (track actual serial merge time)
+    double t_merge_ms = 0.0;
     std::vector<std::pair<int, int>> conflicts;
     bool conflict_free = false;
     if (all_solves_ok) {
+        auto t_m0 = std::chrono::steady_clock::now();
         conflict_free = find_inter_group_conflicts(candidate, agent_to_group, conflicts, planning_window);
+        auto t_m1 = std::chrono::steady_clock::now();
+        t_merge_ms += std::chrono::duration<double, std::milli>(t_m1 - t_m0).count();
     }
 
     // 7. Local Conflict Resolution Loop
@@ -1095,6 +1113,7 @@ void BasicSystem::solve_gd_rhcr()
 
     while (all_solves_ok && !conflict_free && local_iter < max_local_iterations) {
         local_iter++;
+        auto t_dsu0 = std::chrono::steady_clock::now();
         int curr_n_groups = static_cast<int>(groups.size());
         DisjointSet dsu(curr_n_groups);
         for (const auto& c : conflicts) {
@@ -1110,6 +1129,8 @@ void BasicSystem::solve_gd_rhcr()
 
         // If entire set of groups collapsed into a single group, stop local resolution and fallback
         if (comp_map.size() == 1 && comp_map.begin()->second.size() == static_cast<size_t>(curr_n_groups)) {
+            auto t_dsu1 = std::chrono::steady_clock::now();
+            t_merge_ms += std::chrono::duration<double, std::milli>(t_dsu1 - t_dsu0).count();
             break;
         }
 
@@ -1139,6 +1160,9 @@ void BasicSystem::solve_gd_rhcr()
             }
         }
 
+        auto t_dsu1 = std::chrono::steady_clock::now();
+        t_merge_ms += std::chrono::duration<double, std::milli>(t_dsu1 - t_dsu0).count();
+
         if (dirty_group_indices.empty()) {
             conflict_free = true;
             break;
@@ -1165,14 +1189,22 @@ void BasicSystem::solve_gd_rhcr()
         auto t_re_end = std::chrono::steady_clock::now();
         local_resolve_time_ms += std::chrono::duration<double, std::milli>(t_re_end - t_re_start).count();
 
+        double iter_span_ms = 0.0;
         for (const auto& r : re_res_pair.first) {
+            double rt_ms = r.runtime * 1000.0;
+            total_work_ms += rt_ms;
+            iter_span_ms = std::max(iter_span_ms, rt_ms);
+            min_group_ms = std::min(min_group_ms, rt_ms);
+
             int wid = r.worker_id;
             if (wid >= 0 && wid < (int)worker_busy.size()) {
-                worker_busy[wid] += r.runtime * 1000.0;
+                worker_busy[wid] += rt_ms;
             } else if (worker_busy.size() == 1) {
-                worker_busy[0] += r.runtime * 1000.0;
+                worker_busy[0] += rt_ms;
             }
         }
+        total_span_ms += iter_span_ms;
+        total_tasks_executed += re_tasks.size();
 
         bool re_solves_ok = true;
         for (const auto& r : re_res_pair.first) {
@@ -1191,15 +1223,21 @@ void BasicSystem::solve_gd_rhcr()
             break;
         }
 
+        auto t_m2 = std::chrono::steady_clock::now();
         conflicts.clear();
         conflict_free = find_inter_group_conflicts(candidate, agent_to_group, conflicts, planning_window);
+        auto t_m3 = std::chrono::steady_clock::now();
+        t_merge_ms += std::chrono::duration<double, std::milli>(t_m3 - t_m2).count();
     }
 
     groups_after = static_cast<int>(groups.size());
 
     // 8. Final Validation and Fallback Check
+    auto t_v0 = std::chrono::steady_clock::now();
     std::string final_err;
     bool final_valid = all_solves_ok && conflict_free && validate_joint_paths(candidate, &final_err, planning_window);
+    auto t_v1 = std::chrono::steady_clock::now();
+    t_merge_ms += std::chrono::duration<double, std::milli>(t_v1 - t_v0).count();
 
     int inter_group_collisions = 0;
     if (final_valid) {
@@ -1257,7 +1295,7 @@ void BasicSystem::solve_gd_rhcr()
 
     auto t_cycle_end = std::chrono::steady_clock::now();
     double t_cycle_total_ms = std::chrono::duration<double, std::milli>(t_cycle_end - t_cycle_start).count();
-    double t_serial_rest_ms = std::max(0.0, t_cycle_total_ms - (t_part_ms + t_dispatch_ms + t_solve_wall_ms + local_resolve_time_ms + global_fallback_time_ms));
+    double t_serial_rest_ms = std::max(0.0, t_cycle_total_ms - (t_part_ms + t_dispatch_ms + t_merge_ms + t_solve_wall_ms + local_resolve_time_ms + global_fallback_time_ms));
 
     if (metrics_logger) {
         metrics::EpisodeMetrics em;
@@ -1266,13 +1304,13 @@ void BasicSystem::solve_gd_rhcr()
         em.num_groups = groups_after;
         em.group_sizes = group_sizes_str;
         em.solve_time_ms = t_solve_wall_ms + local_resolve_time_ms + global_fallback_time_ms;
-        em.max_group_solve_ms = 0.0;
-        em.min_group_solve_ms = 0.0;
-        em.mean_group_solve_ms = 0.0;
+        em.max_group_solve_ms = total_span_ms;
+        em.min_group_solve_ms = (min_group_ms < 1e8) ? min_group_ms : 0.0;
+        em.mean_group_solve_ms = (total_tasks_executed > 0) ? (total_work_ms / total_tasks_executed) : 0.0;
         em.t_partition_ms = t_part_ms;
         em.t_dispatch_ms = t_dispatch_ms;
         em.t_barrier_wait_ms = t_barrier_wait_ms;
-        em.merge_time_ms = local_resolve_time_ms;
+        em.merge_time_ms = t_merge_ms;
         em.t_serial_rest_ms = t_serial_rest_ms;
         em.inter_group_collisions = inter_group_collisions;
         em.groups_before = groups_before;

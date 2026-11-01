@@ -113,21 +113,89 @@ std::vector<Task> TaskGenerator::generate_batch(int num_tasks,
     return batch;
 }
 
+void TaskGenerator::set_zoning(bool enabled, double cross_zone_prob, int tile_h, int tile_w, int map_width, int map_height) {
+    task_zoning_ = enabled;
+    cross_zone_prob_ = cross_zone_prob;
+    tile_h_ = tile_h;
+    tile_w_ = tile_w;
+    num_zones_c_ = std::max(1, map_width / tile_w_);
+    int num_zones_r = std::max(1, map_height / tile_h_);
+    total_zones_ = std::max(1, num_zones_r * num_zones_c_);
+
+    zone_endpoints_.assign(total_zones_, std::vector<int>());
+    other_zone_endpoints_.assign(total_zones_, std::vector<int>());
+
+    for (int ep : endpoints_) {
+        int r = ep / map_width;
+        int c = ep % map_width;
+        int zr = r / tile_h_;
+        int zc = c / tile_w_;
+        int zid = zr * num_zones_c_ + zc;
+        if (zid >= 0 && zid < total_zones_) {
+            zone_endpoints_[zid].push_back(ep);
+        }
+    }
+
+    for (int z = 0; z < total_zones_; ++z) {
+        for (int ep : endpoints_) {
+            int r = ep / map_width;
+            int c = ep % map_width;
+            int zr = r / tile_h_;
+            int zc = c / tile_w_;
+            int zid = zr * num_zones_c_ + zc;
+            if (zid != z) {
+                other_zone_endpoints_[z].push_back(ep);
+            }
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // make_task (private)
 // ---------------------------------------------------------------------------
 Task TaskGenerator::make_task(int release_time, int map_width, int /*map_height*/) {
-    // Draw pickup and delivery from endpoints (must be distinct)
-    int pickup_idx    = endpoint_dist_(rng_);
-    int delivery_idx  = endpoint_dist_(rng_);
-    int attempts      = 0;
-    while (delivery_idx == pickup_idx && attempts < 100) {
-        delivery_idx = endpoint_dist_(rng_);
-        ++attempts;
-    }
+    int pickup = -1;
+    int delivery = -1;
 
-    int pickup   = endpoints_[pickup_idx];
-    int delivery = endpoints_[delivery_idx];
+    if (task_zoning_ && total_zones_ > 1) {
+        int z = rng_() % total_zones_;
+        if (!zone_endpoints_[z].empty()) {
+            pickup = zone_endpoints_[z][rng_() % zone_endpoints_[z].size()];
+        } else {
+            pickup = endpoints_[endpoint_dist_(rng_)];
+        }
+
+        std::uniform_real_distribution<double> udist(0.0, 1.0);
+        bool home = (udist(rng_) >= cross_zone_prob_);
+        if (home && !zone_endpoints_[z].empty()) {
+            delivery = zone_endpoints_[z][rng_() % zone_endpoints_[z].size()];
+            int tries = 0;
+            while (delivery == pickup && zone_endpoints_[z].size() > 1 && tries < 50) {
+                delivery = zone_endpoints_[z][rng_() % zone_endpoints_[z].size()];
+                tries++;
+            }
+        } else if (!other_zone_endpoints_[z].empty()) {
+            delivery = other_zone_endpoints_[z][rng_() % other_zone_endpoints_[z].size()];
+            int tries = 0;
+            while (delivery == pickup && other_zone_endpoints_[z].size() > 1 && tries < 50) {
+                delivery = other_zone_endpoints_[z][rng_() % other_zone_endpoints_[z].size()];
+                tries++;
+            }
+        } else {
+            delivery = endpoints_[endpoint_dist_(rng_)];
+        }
+    } else {
+        // Draw pickup and delivery from endpoints (must be distinct)
+        int pickup_idx    = endpoint_dist_(rng_);
+        int delivery_idx  = endpoint_dist_(rng_);
+        int attempts      = 0;
+        while (delivery_idx == pickup_idx && attempts < 100) {
+            delivery_idx = endpoint_dist_(rng_);
+            ++attempts;
+        }
+        pickup   = endpoints_[pickup_idx];
+        delivery = endpoints_[delivery_idx];
+    }
 
     // Compute minimum feasible travel time as Manhattan distance
     int min_travel = manhattan_distance(pickup, delivery, map_width);

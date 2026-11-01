@@ -84,6 +84,10 @@ void set_parameters(BasicSystem& system, const BasicGraph& G, const boost::progr
 		system.realtime_coupling = vm["realtime_coupling"].as<bool>();
 	if (vm.count("planning_tau"))
 		system.planning_tau = vm["planning_tau"].as<double>();
+	if (vm.count("task_zoning"))
+		system.task_zoning = vm["task_zoning"].as<bool>();
+	if (vm.count("cross_zone_prob"))
+		system.cross_zone_prob = vm["cross_zone_prob"].as<double>();
 
 	if (vm.count("tasks_csv"))
 		system.tasks_output_csv = vm["tasks_csv"].as<std::string>();
@@ -251,6 +255,8 @@ int main(int argc, char** argv)
 		("git_commit", po::value<std::string>()->default_value(""), "git commit hash for provenance tracking")
 		("realtime_coupling", po::value<bool>()->default_value(false)->implicit_value(true), "enable real-time planning-budget coupling")
 		("planning_tau", po::value<double>()->default_value(0.05), "wall-clock seconds per simulated timestep for budget coupling")
+		("task_zoning", po::value<bool>()->default_value(false)->implicit_value(true), "enable zoned task generation")
+		("cross_zone_prob", po::value<double>()->default_value(0.05), "probability of cross-zone destination selection")
 		("tasks_csv", po::value<std::string>()->default_value(""), "path to output per-task records CSV")
 		("snapshot_csv", po::value<std::string>()->default_value(""), "path to output deadline snapshots CSV")
 		("csv_metrics", po::value<std::string>()->default_value(""), "path to output summary CSV (Person D)")

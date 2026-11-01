@@ -81,12 +81,24 @@ public:
     double get_deadline_factor() const { return deadline_factor_; }
     int    get_tasks_generated() const { return next_task_id_; }
 
+    void set_zoning(bool enabled, double cross_zone_prob, int tile_h, int tile_w, int map_width, int map_height);
+
 private:
     std::vector<int> endpoints_;
     int              seed_;
     double           arrival_rate_;
     double           deadline_factor_;
     int              min_deadline_slack_;
+
+    // Task zoning
+    bool task_zoning_ = false;
+    double cross_zone_prob_ = 0.05;
+    int tile_h_ = 33;
+    int tile_w_ = 46;
+    int total_zones_ = 1;
+    int num_zones_c_ = 1;
+    std::vector<std::vector<int>> zone_endpoints_;
+    std::vector<std::vector<int>> other_zone_endpoints_;
 
     // RNG state
     std::mt19937                          rng_;
