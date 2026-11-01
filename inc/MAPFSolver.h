@@ -37,7 +37,7 @@ public:
 
 
 	MAPFSolver(const BasicGraph& G, SingleAgentSolver& path_planner);
-	~MAPFSolver();
+	virtual ~MAPFSolver();
 
 	// Save results
 	virtual void save_results(const std::string &fileName, const std::string &instanceName) const = 0;

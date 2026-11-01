@@ -1,0 +1,15 @@
+{
+  "timestamp_start": "2026-10-31T04:12:26Z",
+  "git_commit": "2bd958ef877ba55923b1346a34210aa718a8f634",
+  "platform": "macOS Darwin 27.0.0 (arm64)",
+  "cpu_model": "Apple M3 Pro",
+  "cpu_cores_physical": 11,
+  "cpu_performance_cores": 5,
+  "cpu_efficiency_cores": 6,
+  "smt_hyperthreading": false,
+  "ram_gb": 18,
+  "ram_type": "Unified Memory LPDDR5",
+  "compiler": "Apple clang version 21.0.0 (clang-2100.3.34.2)",
+  "compiler_flags": "-O3 -DNDEBUG",
+  "clock_source": "std::chrono::steady_clock (monotonic)"
+}

@@ -231,7 +231,7 @@ void ReservationTable::insertPath2CT(const Path& path)
 	else
 	{
 		if (G.types[prev->location] != "Magic")
-			ct[prev->location].emplace_back(prev->timestep - k_robust, path.back().timestep + 1 + k_robust);
+			ct[prev->location].emplace_back(prev->timestep - k_robust, max(window, path.back().timestep) + 1 + k_robust);
 		if (k_robust == 0) // add edge constraint
 		{
 			ct[getEdgeIndex(path.back().location, prev->location)].emplace_back(path.back().timestep, path.back().timestep + 1);

@@ -32,6 +32,7 @@ private:
     StateTimeAStar astar; // TODO: delete this
     unordered_map<int, int> curr_locations; // key = location, value = agent_id
     unordered_map<int, int> next_locations; // key = location, value = agent_id
+    unordered_map<long long, int> edge_moves; // key = (u << 32) | v, value = agent_id
     // vector<list<pair<int, int> > > trajectories;
 
     void print_results() const;

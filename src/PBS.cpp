@@ -160,6 +160,25 @@ void PBS::find_conflicts(list<Conflict>& conflicts, int a1, int a2)
 			}
 
 		}
+
+		if (size1 != size2)
+		{
+			int a1_ = size1 < size2 ? a1 : a2;
+			int a2_ = size1 < size2 ? a2 : a1;
+			int loc1 = paths[a1_]->back().location;
+			int min_len = min(size1, size2);
+			int max_len = max(size1, size2);
+			for (int timestep = min_len; timestep < max_len; timestep++)
+			{
+				int loc2 = paths[a2_]->at(timestep).location;
+				if (loc1 == loc2 && G.types[loc1] != "Magic")
+				{
+					conflicts.emplace_back(a1_, a2_, loc1, -1, timestep);
+					runtime_detect_conflicts += (double)(std::clock() - t) / CLOCKS_PER_SEC;
+					return;
+				}
+			}
+		}
     }
 	runtime_detect_conflicts += (double)(std::clock() - t) / CLOCKS_PER_SEC;
 }
@@ -790,7 +809,12 @@ bool PBS::run(const vector<State>& starts,
         int start_loc = starts[i].location;
         for (const auto& goal : goal_locations[i])
         {
-            min_sum_of_costs += G.heuristics.at(goal.first)[start_loc];
+            auto it = G.heuristics.find(goal.first);
+            if (it != G.heuristics.end()) {
+                min_sum_of_costs += it->second[start_loc];
+            } else {
+                min_sum_of_costs += G.get_Manhattan_distance(goal.first, start_loc);
+            }
             start_loc = goal.first;
         }
     }

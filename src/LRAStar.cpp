@@ -172,6 +172,7 @@ void LRAStar::resolve_conflicts(const vector<Path>& input_paths)
     for (int t = 1; t <= simulation_window; t++)
     {
         next_locations.clear();
+        edge_moves.clear();
         vector<int> agents_list(num_of_agents);
         for (int k = 0; k < num_of_agents; k++)
         {
@@ -186,12 +187,13 @@ void LRAStar::resolve_conflicts(const vector<Path>& input_paths)
 			}
             int loc = input_paths[agent][path_pointers[agent]].location;
             int orientation = input_paths[agent][path_pointers[agent]].orientation;
-            if (loc == solution[agent][t - 1].location)
+            int prev_loc = solution[agent][t - 1].location;
+            if (loc == prev_loc)
             { // The agent wait or rotates at its current location
 				solution[agent].emplace_back(loc, t, orientation);
                 path_pointers[agent]++;
                 auto other = next_locations.find(loc); // conflict with other agent
-                if (other != next_locations.end())
+                if (other != next_locations.end() && other->second != agent)
                 {
                     wait_command(other->second, t, path_pointers); // Other agent has to wait
                     path_pointers[other->second]--;
@@ -201,17 +203,28 @@ void LRAStar::resolve_conflicts(const vector<Path>& input_paths)
             { // The agent cannot move because its next location is occupied currently
                 wait_command(agent, t, path_pointers);
             }
-            else // The agent wants to move to a location that is currently empty
+            else // The agent wants to move across edge (prev_loc -> loc)
             {
-                auto other = next_locations.find(loc);
-                if (other == next_locations.end())
-                { // No other agents want to go to this location yet
-					solution[agent].emplace_back(loc, t, orientation);
-                    path_pointers[agent]++;
+                long long reverse_edge = ((long long)loc << 32) | (unsigned int)prev_loc;
+                if (edge_moves.find(reverse_edge) != edge_moves.end())
+                {
+                    // Edge swap conflict with an agent traversing (loc -> prev_loc)
+                    wait_command(agent, t, path_pointers);
                 }
                 else
-                { // Another agent also wants to go to this location, for now we just force this agent to wait
-                    wait_command(agent, t, path_pointers);
+                {
+                    auto other = next_locations.find(loc);
+                    if (other == next_locations.end())
+                    { // No other agents want to go to this location yet
+                        solution[agent].emplace_back(loc, t, orientation);
+                        path_pointers[agent]++;
+                        long long forward_edge = ((long long)prev_loc << 32) | (unsigned int)loc;
+                        edge_moves[forward_edge] = agent;
+                    }
+                    else
+                    { // Another agent also wants to go to this location, for now we just force this agent to wait
+                        wait_command(agent, t, path_pointers);
+                    }
                 }
             }
             next_locations[solution[agent][t].location] = agent;
@@ -227,17 +240,23 @@ void LRAStar::wait_command(int agent, int timestep,
         vector<list<pair<int, int> >::const_iterator >& traj_pointers)
 {
     int location = solution[agent][timestep - 1].location;
-    if ((int)solution[agent].size() == timestep)
+    if ((int)solution[agent].size() > timestep)
+    {
+        int old_dest = solution[agent][timestep].location;
+        if (old_dest != location)
+        {
+            long long old_edge = ((long long)location << 32) | (unsigned int)old_dest;
+            edge_moves.erase(old_edge);
+        }
+        solution[agent][timestep] = solution[agent][timestep - 1];
+    }
+    else if ((int)solution[agent].size() == timestep)
     {
 		solution[agent].push_back(solution[agent][timestep - 1]);
     }
-    else
-    {
-		solution[agent][timestep] = solution[agent][timestep - 1];
-    }
 	solution[agent][timestep].timestep = timestep;
     auto other = next_locations.find(location); // whether conflict with other agent
-    if (other != next_locations.end())
+    if (other != next_locations.end() && other->second != agent)
     {
         wait_command(other->second, timestep, traj_pointers); // Other agent has to wait
         --traj_pointers[other->second];
@@ -251,17 +270,23 @@ void LRAStar::wait_command(int agent, int timestep,
                            vector<int>& path_pointers)
 {
     int location = solution[agent][timestep - 1].location;
-    if ((int)solution[agent].size() == timestep)
+    if ((int)solution[agent].size() > timestep)
+    {
+        int old_dest = solution[agent][timestep].location;
+        if (old_dest != location)
+        {
+            long long old_edge = ((long long)location << 32) | (unsigned int)old_dest;
+            edge_moves.erase(old_edge);
+        }
+        solution[agent][timestep] = solution[agent][timestep - 1];
+    }
+    else if ((int)solution[agent].size() == timestep)
     {
 		solution[agent].push_back(solution[agent][timestep - 1]);
     }
-    else
-    {
-		solution[agent][timestep] = solution[agent][timestep - 1];
-    }
 	solution[agent][timestep].timestep = timestep;
     auto other = next_locations.find(location); // whether conflict with other agent
-    if (other != next_locations.end())
+    if (other != next_locations.end() && other->second != agent)
     {
         wait_command(other->second, timestep, path_pointers); // Other agent has to wait
         path_pointers[other->second]--;

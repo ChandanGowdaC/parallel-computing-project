@@ -42,8 +42,12 @@ lifelong.vcxproj.user
 exp/
 results/raw/*.csv
 results/logs/
+results/profiling_raw/
+results/test_perf/
+results/smoke_raw/
 *.log
 results/experiment_summary.csv
+maps/*_heuristics_table.txt
 
 # Keep directory structure in git
 !results/raw/.gitkeep

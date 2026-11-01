@@ -13,6 +13,8 @@ bool WHCAStar::run(const vector<State>& starts,
     num_generated = 0;
     num_restarts = 0;
     int num_of_agents = starts.size();
+    if (initial_solution.size() != static_cast<size_t>(num_of_agents))
+        initial_solution.resize(num_of_agents);
 
     ReservationTable rt(G);
     rt.num_of_agents = num_of_agents;

@@ -41,7 +41,6 @@ An empirical implementation and benchmarking framework for **Group Decentralized
 │   └── run_experiments.sh         # Automated experiment runner
 ├── analysis/                      # Person D: Python analysis pipeline
 │   ├── requirements.txt           # Python dependencies
-│   ├── generate_stub_data.py      # Synthetic data generator
 │   ├── aggregate_results.py       # Cross-seed aggregation + speedup/efficiency
 │   └── plot_results.py            # 10 publication-quality figure generators
 ├── results/                       # Person D: Output directories
@@ -251,9 +250,11 @@ cd analysis
 pip install -r requirements.txt
 ```
 
-#### 2. Generate synthetic stub data (sanity check)
+#### 2. Run simulation experiments
 ```bash
-python3 generate_stub_data.py --output-dir ../results/raw --small
+cd experiments
+chmod +x run_experiments.sh
+./run_experiments.sh --quick      # sanity check
 ```
 
 #### 3. Aggregate results across seeds

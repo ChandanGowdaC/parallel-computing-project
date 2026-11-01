@@ -222,8 +222,8 @@ run_single() {
     timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
     # Build command
-    local cmd="${BINARY}"
-    cmd+=" -m ${map_file}"
+    local cmd="\"${BINARY}\""
+    cmd+=" -m \"${map_file}\""
     cmd+=" -k ${agents}"
     cmd+=" --scenario=${scenario}"
     cmd+=" --solver=${SOLVER}"
@@ -233,7 +233,8 @@ run_single() {
     cmd+=" --planning_window=${PLANNING_W}"
     cmd+=" --task_arrival_rate=${rate}"
     cmd+=" --scheduling_policy=${policy}"
-    cmd+=" --output_dir=${RESULTS_DIR}"
+    cmd+=" --deadline"
+    cmd+=" --output_dir=\"${RESULTS_DIR}\""
     cmd+=" --run_id=${run_id}"
 
     if [[ "$mode" == "parallel" ]]; then
@@ -255,8 +256,23 @@ run_single() {
     start_ns=$(date +%s%N)
 
     set +e
-    timeout "${TIMEOUT}s" bash -c "${cmd}" > "${log_file}" 2>&1
-    local exit_code=$?
+    if command -v timeout &>/dev/null; then
+        timeout "${TIMEOUT}s" bash -c "${cmd}" > "${log_file}" 2>&1
+        local exit_code=$?
+    elif command -v gtimeout &>/dev/null; then
+        gtimeout "${TIMEOUT}s" bash -c "${cmd}" > "${log_file}" 2>&1
+        local exit_code=$?
+    else
+        python3 -c "import subprocess, sys
+try:
+    with open(sys.argv[2], 'w') as out:
+        p = subprocess.run(['bash', '-c', sys.argv[3]], timeout=int(sys.argv[1]), stdout=out, stderr=subprocess.STDOUT)
+        sys.exit(p.returncode)
+except subprocess.TimeoutExpired:
+    sys.exit(124)
+" "$TIMEOUT" "$log_file" "$cmd"
+        local exit_code=$?
+    fi
     set -e
 
     local end_ns

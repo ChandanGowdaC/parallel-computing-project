@@ -13,6 +13,9 @@
 #include "TaskGenerator.h"
 #include "DeadlineScheduler.h"
 #include "DeadlineMetrics.h"
+#include "metrics_logger.h"
+#include "SolverFactory.h"
+#include "GDRHCR.h"
 #include <memory>
 
 
@@ -58,8 +61,34 @@ public:
 
     // Experiment logging (Person D)
     std::string scenario_name = "";
+    std::string run_id = "";
+    std::string git_commit = "";
+    std::string output_dir = "";
     std::string csv_metrics_path = "";
     std::string json_metrics_path = "";
+    bool realtime_coupling = false;
+    double planning_tau = 0.05;
+    double total_solver_time = 0.0;
+    int num_replan_episodes = 0;
+    int total_collisions = 0;
+    int total_group_count_sum = 0;
+    double max_group_solve_time_overall = 0.0;
+    int total_dispatched_group_solves = 0;
+    int num_fallback_invocations = 0;
+    int sequential_fallback_threshold = 0;
+    int budget_violations = 0;
+    double total_budget_overrun_time = 0.0;
+    std::unique_ptr<metrics::MetricsLogger> metrics_logger;
+    std::unique_ptr<SolverFactory> solver_factory;
+    std::unique_ptr<ParallelExecutor> parallel_executor;
+    int episode_count = 0;
+
+    void init_metrics_logger();
+    void finish_metrics_logging();
+    void solve_gd_rhcr();
+    void solve_sequential();
+    void run_sequential_solve_core();
+    void apply_planning_delay(int delta_t);
 
     // Track overall wall-clock runtime
     double overall_runtime = 0.0;

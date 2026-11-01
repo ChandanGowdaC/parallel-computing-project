@@ -21,7 +21,7 @@ public:
         bool operator()(const StateTimeAStarNode* n1, const StateTimeAStarNode* n2) const
         {
             if (n1->g_val + n1->h_val == n2->g_val + n2->h_val)
-                return rand() % 2 == 0;  // break ties randomly
+                return n1->g_val <= n2->g_val;  // break ties towards larger g_vals deterministically
             return n1->g_val + n1->h_val >= n2->g_val + n2->h_val;
         }
     };  // used by OPEN (heap) to compare nodes (top of the heap has min f-val, and then highest g-val)

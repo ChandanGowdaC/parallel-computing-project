@@ -23,7 +23,7 @@
 #include <sstream>
 #include <iomanip>
 #include <iostream>
-#include <filesystem>
+#include <boost/filesystem.hpp>
 
 namespace metrics {
 
@@ -36,6 +36,7 @@ struct RunConfig {
     std::string scenario;        // "KIVA" or "SORTING"
     std::string solver;          // "PBS", "ECBS", "WHCA"
     std::string solver_mode;     // "sequential" or "parallel"
+    std::string git_commit;      // Git commit hash for provenance tracking
     int thread_count       = 1;
     int agent_count        = 100;
     double task_arrival_rate = 1.0;
@@ -43,6 +44,7 @@ struct RunConfig {
     int planning_window_w  = 10;
     double visibility_radius_v = 0.0;  // 0 = off (sequential)
     int seed               = 42;
+    std::string scheduling_policy = "FIFO";
 
     // Generates a unique run_id from config
     std::string makeRunId() const {
@@ -94,7 +96,12 @@ struct EpisodeMetrics {
     double solve_time_ms          = 0.0;
     double max_group_solve_ms     = 0.0;
     double min_group_solve_ms     = 0.0;
+    double mean_group_solve_ms    = 0.0;
+    double t_partition_ms         = 0.0;
+    double t_dispatch_ms          = 0.0;
+    double t_barrier_wait_ms      = 0.0;
     double merge_time_ms          = 0.0;
+    double t_serial_rest_ms       = 0.0;
     int inter_group_collisions    = 0;
 };
 
@@ -109,11 +116,11 @@ public:
      * @param output_dir  Directory to write CSV files into (e.g., "results/raw")
      * @param config      Run configuration — used to generate run_id and populate config columns
      */
-    MetricsLogger(const std::string& output_dir, const RunConfig& config)
-        : config_(config), run_id_(config.makeRunId()), output_dir_(output_dir)
+    MetricsLogger(const std::string& output_dir, const RunConfig& config, const std::string& custom_run_id = "")
+        : config_(config), run_id_(custom_run_id.empty() ? config.makeRunId() : custom_run_id), output_dir_(output_dir)
     {
         // Create output directory if needed
-        std::filesystem::create_directories(output_dir);
+        boost::filesystem::create_directories(output_dir);
 
         // Capture start timestamp
         auto now = std::chrono::system_clock::now();
@@ -137,8 +144,9 @@ public:
         episode_file_.open(ep_path);
         if (episode_file_.is_open()) {
             episode_file_ << "run_id,episode_id,timestep,num_groups,group_sizes,"
-                          << "solve_time_ms,max_group_solve_ms,min_group_solve_ms,"
-                          << "merge_time_ms,inter_group_collisions\n";
+                          << "solve_time_ms,max_group_solve_ms,min_group_solve_ms,mean_group_solve_ms,"
+                          << "t_partition_ms,t_dispatch_ms,t_barrier_wait_ms,merge_time_ms,t_serial_rest_ms,"
+                          << "inter_group_collisions\n";
         }
     }
 
@@ -175,7 +183,12 @@ public:
                       << e.solve_time_ms << ","
                       << e.max_group_solve_ms << ","
                       << e.min_group_solve_ms << ","
+                      << e.mean_group_solve_ms << ","
+                      << e.t_partition_ms << ","
+                      << e.t_dispatch_ms << ","
+                      << e.t_barrier_wait_ms << ","
                       << e.merge_time_ms << ","
+                      << e.t_serial_rest_ms << ","
                       << e.inter_group_collisions << "\n";
     }
 
@@ -189,9 +202,9 @@ public:
         }
 
         // Header
-        run_file << "run_id,timestamp,map_name,scenario,solver,solver_mode,"
+        run_file << "run_id,timestamp,git_commit,map_name,scenario,solver,solver_mode,"
                  << "thread_count,agent_count,task_arrival_rate,"
-                 << "planning_horizon_h,planning_window_w,visibility_radius_v,seed,"
+                 << "planning_horizon_h,planning_window_w,visibility_radius_v,seed,scheduling_policy,"
                  << "simulation_timesteps,total_runtime_ms,solver_runtime_ms,"
                  << "num_replan_episodes,num_tasks_generated,num_tasks_completed,"
                  << "throughput,num_groups,avg_group_size,max_group_solve_ms,"
@@ -201,6 +214,7 @@ public:
         // Data row
         run_file << run_id_ << ","
                  << timestamp_ << ","
+                 << (config_.git_commit.empty() ? "unknown" : config_.git_commit) << ","
                  << config_.map_name << ","
                  << config_.scenario << ","
                  << config_.solver << ","
@@ -212,6 +226,7 @@ public:
                  << config_.planning_window_w << ","
                  << config_.visibility_radius_v << ","
                  << config_.seed << ","
+                 << config_.scheduling_policy << ","
                  << r.simulation_timesteps << ","
                  << r.total_runtime_ms << ","
                  << r.solver_runtime_ms << ","

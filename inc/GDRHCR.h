@@ -167,30 +167,75 @@ inline std::vector<GroupPlanningResult> solve_group_tasks(
 
 inline bool validate_joint_paths(
     const std::vector<Path>& paths,
-    std::string* error_message = nullptr) {
+    std::string* error_message = nullptr,
+    int window = -1) {
     const auto fail = [error_message](const std::string& message) {
         if (error_message != nullptr) {
             *error_message = message;
         }
         return false;
     };
-    for (std::size_t first = 0; first < paths.size(); ++first) {
-        for (std::size_t second = first + 1; second < paths.size(); ++second) {
-            const std::size_t common_length = std::min(paths[first].size(), paths[second].size());
-            for (std::size_t time = 0; time < common_length; ++time) {
-                const int first_location = paths[first][time].location;
-                const int second_location = paths[second][time].location;
-                if (first_location == second_location) {
-                    return fail("two agents occupy the same cell in the merged plan");
+
+    // Fast O(N * w) collision validation via spacetime occupancy hashing
+    std::size_t max_time = 0;
+    for (const auto& p : paths) {
+        if (p.size() > max_time) max_time = p.size();
+    }
+    if (window > 0 && max_time > static_cast<std::size_t>(window + 1)) {
+        max_time = static_cast<std::size_t>(window + 1);
+    }
+    if (max_time == 0) {
+        if (error_message != nullptr) {
+            error_message->clear();
+        }
+        return true;
+    }
+
+    std::unordered_map<int, int> cell_occupancy;
+    std::unordered_map<long long, int> edge_moves;
+
+    for (std::size_t time = 0; time < max_time; ++time) {
+        cell_occupancy.clear();
+        edge_moves.clear();
+
+        // 1. Vertex collision check at timestep
+        for (std::size_t a = 0; a < paths.size(); ++a) {
+            if (paths[a].empty()) continue;
+            int loc = (time < paths[a].size()) ? paths[a][time].location : paths[a].back().location;
+            if (loc < 0) continue;
+            auto it = cell_occupancy.find(loc);
+            if (it != cell_occupancy.end()) {
+                int first = it->second;
+                int second = static_cast<int>(a);
+                return fail("two agents (" + std::to_string(first) + " and " + std::to_string(second) +
+                            ") occupy cell " + std::to_string(loc) + " at t=" + std::to_string(time) + " in the merged plan");
+            }
+            cell_occupancy.emplace(loc, static_cast<int>(a));
+        }
+
+        // 2. Edge swap collision check between timestep and timestep + 1
+        if (time + 1 < max_time) {
+            for (std::size_t a = 0; a < paths.size(); ++a) {
+                if (time + 1 >= paths[a].size()) continue;
+                int u = paths[a][time].location;
+                int v = paths[a][time + 1].location;
+                if (u == v || u < 0 || v < 0) continue;
+
+                long long reverse_edge = (static_cast<long long>(v) << 32) | static_cast<unsigned int>(u);
+                auto it = edge_moves.find(reverse_edge);
+                if (it != edge_moves.end()) {
+                    int first = it->second;
+                    int second = static_cast<int>(a);
+                    return fail("two agents (" + std::to_string(first) + " and " + std::to_string(second) +
+                                ") traverse the same edge (" + std::to_string(u) + " <-> " +
+                                std::to_string(v) + ") in opposite directions at t=" + std::to_string(time));
                 }
-                if (time + 1 < common_length &&
-                    first_location == paths[second][time + 1].location &&
-                    second_location == paths[first][time + 1].location) {
-                    return fail("two agents traverse the same edge in opposite directions");
-                }
+                long long forward_edge = (static_cast<long long>(u) << 32) | static_cast<unsigned int>(v);
+                edge_moves.emplace(forward_edge, static_cast<int>(a));
             }
         }
     }
+
     if (error_message != nullptr) {
         error_message->clear();
     }
@@ -205,7 +250,8 @@ inline bool merge_group_results(
     const std::vector<GroupPlanningResult>& results,
     std::size_t total_agents,
     std::vector<Path>& merged_paths,
-    std::string* error_message = nullptr) {
+    std::string* error_message = nullptr,
+    int window = -1) {
     const auto fail = [error_message](const std::string& message) {
         if (error_message != nullptr) {
             *error_message = message;
@@ -266,8 +312,11 @@ inline bool merge_group_results(
     if (result_ids.size() != task_by_id.size()) {
         return fail("one or more group results are missing");
     }
+    if (window <= 0 && !tasks.empty()) {
+        window = tasks[0].planning_window;
+    }
     std::string collision_error;
-    if (!validate_joint_paths(candidate, &collision_error)) {
+    if (!validate_joint_paths(candidate, &collision_error, window)) {
         return fail(collision_error);
     }
 

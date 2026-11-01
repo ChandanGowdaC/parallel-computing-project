@@ -23,6 +23,7 @@ if(APPLE)
 endif()
 
 include_directories("${CMAKE_CURRENT_SOURCE_DIR}/inc")
+include_directories("${CMAKE_CURRENT_SOURCE_DIR}/metrics")
 
 # Find Threads
 find_package(Threads REQUIRED)
@@ -31,7 +32,38 @@ find_package(Threads REQUIRED)
 find_package(Boost 1.49.0 REQUIRED COMPONENTS program_options system filesystem)
 include_directories(${Boost_INCLUDE_DIRS})
 
-file(GLOB SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp")
+set(SOURCES
+    src/BasicGraph.cpp
+    src/BasicSystem.cpp
+    src/BeeGraph.cpp
+    src/BeeSystem.cpp
+    src/DeadlineMetrics.cpp
+    src/DeadlineScheduler.cpp
+    src/ECBS.cpp
+    src/ECBSNode.cpp
+    src/ID.cpp
+    src/KivaGraph.cpp
+    src/KivaSystem.cpp
+    src/LRAStar.cpp
+    src/MAPFSolver.cpp
+    src/OnlineGraph.cpp
+    src/OnlineSystem.cpp
+    src/PBS.cpp
+    src/PBSNode.cpp
+    src/PathTable.cpp
+    src/PriorityGraph.cpp
+    src/ReservationTable.cpp
+    src/SIPP.cpp
+    src/SingleAgentSolver.cpp
+    src/SortingGraph.cpp
+    src/SortingSystem.cpp
+    src/StateTimeAStar.cpp
+    src/States.cpp
+    src/TaskGenerator.cpp
+    src/WHCAStar.cpp
+    src/common.cpp
+    src/driver.cpp
+)
 
 # Main simulation executable
 add_executable(lifelong ${SOURCES})
@@ -69,4 +101,29 @@ add_executable(test_deadline_workload
 )
 target_link_libraries(test_deadline_workload PRIVATE Threads::Threads)
 add_test(NAME DeadlineWorkloadTest COMMAND test_deadline_workload)
+
+# 5. GD-RHCR group solve dispatch test (asserts total_dispatched_group_solves > 0)
+set(ENGINE_SOURCES ${SOURCES})
+list(FILTER ENGINE_SOURCES EXCLUDE REGEX ".*/driver\\.cpp$")
+add_executable(test_gd_rhcr_dispatch
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_gd_rhcr_dispatch.cpp"
+    ${ENGINE_SOURCES}
+)
+target_link_libraries(test_gd_rhcr_dispatch PRIVATE ${Boost_LIBRARIES} Threads::Threads)
+add_test(NAME GDRHCRDispatchTest COMMAND test_gd_rhcr_dispatch WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
+
+# 6. Real-time planning-budget coupling test (slowed planner misses more deadlines)
+add_executable(test_realtime_coupling
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_realtime_coupling.cpp"
+    ${ENGINE_SOURCES}
+)
+target_link_libraries(test_realtime_coupling PRIVATE ${Boost_LIBRARIES} Threads::Threads)
+add_test(NAME RealtimeCouplingTest COMMAND test_realtime_coupling WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
+
+# 7. Phase 1 / C4 Group Partition Test
+add_executable(test_c4_group_partition
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_c4_group_partition.cpp"
+)
+target_link_libraries(test_c4_group_partition PRIVATE Threads::Threads)
+add_test(NAME C4GroupPartitionTest COMMAND test_c4_group_partition WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
 

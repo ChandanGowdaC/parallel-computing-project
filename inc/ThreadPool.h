@@ -17,17 +17,17 @@ public:
     template<class F, class... Args>
     auto enqueue(F&& f, Args&&... args) 
         -> std::future<typename std::result_of<F(Args...)>::type>;
+    void enqueue_bulk(std::vector<std::function<void()>>&& bulk_tasks);
     ~ThreadPool();
 private:
     // need to keep track of threads so we can join them
     std::vector< std::thread > workers;
-    // the task queue
-    std::queue< std::function<void()> > tasks;
     
-    // synchronization
-    std::mutex queue_mutex;
-    std::condition_variable condition;
-    bool stop;
+    // synchronization (cache-line aligned to prevent false sharing)
+    alignas(64) std::mutex queue_mutex;
+    alignas(64) std::condition_variable condition;
+    alignas(64) bool stop;
+    alignas(64) std::queue< std::function<void()> > tasks;
 };
  
 // the constructor just launches some amount of workers
@@ -87,6 +87,21 @@ auto ThreadPool::enqueue(F&& f, Args&&... args)
     }
     condition.notify_one();
     return res;
+}
+
+// add bulk work items under a single lock acquisition to minimize lock contention
+inline void ThreadPool::enqueue_bulk(std::vector<std::function<void()>>&& bulk_tasks)
+{
+    if (bulk_tasks.empty()) return;
+    {
+        std::unique_lock<std::mutex> lock(queue_mutex);
+        if (stop)
+            throw std::runtime_error("enqueue on stopped ThreadPool");
+        for (auto& t : bulk_tasks) {
+            tasks.emplace(std::move(t));
+        }
+    }
+    condition.notify_all();
 }
 
 // the destructor joins all threads

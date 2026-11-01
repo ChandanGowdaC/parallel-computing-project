@@ -194,6 +194,24 @@ void ECBS::find_conflicts(int start_time, std::list<std::shared_ptr<Conflict> >&
 			}
 
 		}
+
+		if (size1 != size2)
+		{
+			int a1_ = size1 < size2 ? a1 : a2;
+			int a2_ = size1 < size2 ? a2 : a1;
+			int loc1 = paths[a1_]->back().location;
+			int min_len = min(size1, size2);
+			int max_len = max(size1, size2);
+			for (int timestep = min_len; timestep < max_len; timestep++)
+			{
+				int loc2 = paths[a2_]->at(timestep).location;
+				if (loc1 == loc2 && G.types[loc1] != "Magic")
+				{
+					conflicts.emplace_back(new Conflict(a1_, a2_, loc1, -1, timestep));
+					return;
+				}
+			}
+		}
 	}
 
 }

@@ -8,6 +8,13 @@
 #include <chrono>
 #include "ThreadPool.h"
 
+// Parallel execution timing statistics
+struct alignas(64) ParallelExecutionStats {
+    double dispatch_time_ms = 0.0;
+    double barrier_wait_ms = 0.0;
+    double wall_time_ms = 0.0;
+};
+
 // ParallelExecutor: A reusable parallel primitive utility designed for GD-RHCR.
 // Provides parallel_for, parallel_map, and task batch dispatch.
 // Falls back to deterministic sequential execution when num_threads <= 1.
@@ -89,6 +96,68 @@ public:
         }
     }
 
+    // Parallel map with timing statistics
+    template<typename InputType, typename TransformFunc>
+    auto parallel_map_timed(const std::vector<InputType>& inputs, TransformFunc&& func) 
+#if __cplusplus >= 201703L
+        -> std::pair<std::vector<typename std::invoke_result<TransformFunc, const InputType&>::type>, ParallelExecutionStats>
+#else
+        -> std::pair<std::vector<typename std::result_of<TransformFunc(const InputType&)>::type>, ParallelExecutionStats>
+#endif
+    {
+#if __cplusplus >= 201703L
+        using OutputType = typename std::invoke_result<TransformFunc, const InputType&>::type;
+#else
+        using OutputType = typename std::result_of<TransformFunc(const InputType&)>::type;
+#endif
+        ParallelExecutionStats stats;
+        auto t_start = std::chrono::steady_clock::now();
+        size_t n = inputs.size();
+        std::vector<OutputType> results(n);
+        if (n == 0) return {results, stats};
+
+        if (thread_count <= 1 || !pool || n == 1) {
+            auto t0 = std::chrono::steady_clock::now();
+            for (size_t i = 0; i < n; ++i) {
+                results[i] = func(inputs[i]);
+            }
+            auto t1 = std::chrono::steady_clock::now();
+            stats.wall_time_ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
+            stats.dispatch_time_ms = 0.0;
+            stats.barrier_wait_ms = 0.0;
+            return {results, stats};
+        }
+
+        auto t_disp_start = std::chrono::steady_clock::now();
+        std::vector<std::future<OutputType>> futures;
+        futures.reserve(n);
+        std::vector<std::function<void()>> bulk_tasks;
+        bulk_tasks.reserve(n);
+
+        for (size_t i = 0; i < n; ++i) {
+            auto task = std::make_shared<std::packaged_task<OutputType()>>(
+                [&inputs, &func, i]() -> OutputType {
+                    return func(inputs[i]);
+                }
+            );
+            futures.emplace_back(task->get_future());
+            bulk_tasks.emplace_back([task]() { (*task)(); });
+        }
+        pool->enqueue_bulk(std::move(bulk_tasks));
+        auto t_disp_end = std::chrono::steady_clock::now();
+        stats.dispatch_time_ms = std::chrono::duration<double, std::milli>(t_disp_end - t_disp_start).count();
+
+        auto t_wait_start = std::chrono::steady_clock::now();
+        for (size_t i = 0; i < n; ++i) {
+            results[i] = futures[i].get();
+        }
+        auto t_wait_end = std::chrono::steady_clock::now();
+        stats.barrier_wait_ms = std::chrono::duration<double, std::milli>(t_wait_end - t_wait_start).count();
+        stats.wall_time_ms = std::chrono::duration<double, std::milli>(t_wait_end - t_start).count();
+
+        return {results, stats};
+    }
+
     // Parallel map: transform a vector of Input to vector of Output in parallel
     template<typename InputType, typename TransformFunc>
     auto parallel_map(const std::vector<InputType>& inputs, TransformFunc&& func) 
@@ -98,36 +167,7 @@ public:
         -> std::vector<typename std::result_of<TransformFunc(const InputType&)>::type>
 #endif
     {
-#if __cplusplus >= 201703L
-        using OutputType = typename std::invoke_result<TransformFunc, const InputType&>::type;
-#else
-        using OutputType = typename std::result_of<TransformFunc(const InputType&)>::type;
-#endif
-        size_t n = inputs.size();
-        std::vector<OutputType> results(n);
-        if (n == 0) return results;
-
-        if (thread_count <= 1 || !pool || n == 1) {
-            for (size_t i = 0; i < n; ++i) {
-                results[i] = func(inputs[i]);
-            }
-            return results;
-        }
-
-        std::vector<std::future<OutputType>> futures;
-        futures.reserve(n);
-
-        for (size_t i = 0; i < n; ++i) {
-            futures.emplace_back(pool->enqueue([&inputs, &func, i]() -> OutputType {
-                return func(inputs[i]);
-            }));
-        }
-
-        for (size_t i = 0; i < n; ++i) {
-            results[i] = futures[i].get();
-        }
-
-        return results;
+        return parallel_map_timed(inputs, std::forward<TransformFunc>(func)).first;
     }
 
 private:

@@ -8,6 +8,7 @@
     "columns": [
       { "name": "run_id",              "type": "string",  "description": "Unique run identifier: {map}_{solver}_{agents}_{threads}_{seed}" },
       { "name": "timestamp",           "type": "string",  "description": "ISO-8601 UTC timestamp when the run started" },
+      { "name": "git_commit",          "type": "string",  "description": "Git commit hash of the executable binary" },
       { "name": "map_name",            "type": "string",  "description": "Map file used (e.g., kiva, sorting)" },
       { "name": "scenario",            "type": "string",  "description": "Scenario type: KIVA or SORTING" },
       { "name": "solver",              "type": "string",  "description": "Solver used: PBS, ECBS, WHCA" },
@@ -19,6 +20,7 @@
       { "name": "planning_window_w",    "type": "int",     "description": "RHCR solver lookahead window (timesteps)" },
       { "name": "visibility_radius_v",  "type": "float",   "description": "GD-RHCR group partitioning radius (0 = off)", "optional": true },
       { "name": "seed",                "type": "int",     "description": "Random seed for reproducibility" },
+      { "name": "scheduling_policy",   "type": "string",  "description": "Scheduling policy: FIFO, EDF, or DEADLINE_AWARE" },
       { "name": "simulation_timesteps", "type": "int",     "description": "Total simulation timesteps executed" },
       { "name": "total_runtime_ms",     "type": "float",   "description": "Wall-clock total runtime in milliseconds" },
       { "name": "solver_runtime_ms",    "type": "float",   "description": "Wall-clock time spent in the solver only" },
@@ -69,7 +71,12 @@
       { "name": "solve_time_ms",        "type": "float",  "description": "Total wall-clock solver time for this episode" },
       { "name": "max_group_solve_ms",   "type": "float",  "description": "Slowest group's solve time" },
       { "name": "min_group_solve_ms",   "type": "float",  "description": "Fastest group's solve time" },
-      { "name": "merge_time_ms",        "type": "float",  "description": "Time to merge group results" },
+      { "name": "mean_group_solve_ms",  "type": "float",  "description": "Average group solve time across workers" },
+      { "name": "t_partition_ms",       "type": "float",  "description": "Time spent in visibility graph partitioning" },
+      { "name": "t_dispatch_ms",        "type": "float",  "description": "Time spent in task creation and thread-pool queueing" },
+      { "name": "t_barrier_wait_ms",    "type": "float",  "description": "Time spent waiting at thread-pool synchronization barrier" },
+      { "name": "merge_time_ms",        "type": "float",  "description": "Time to merge group results and check conflicts" },
+      { "name": "t_serial_rest_ms",     "type": "float",  "description": "Remaining serial overhead outside parallel solve" },
       { "name": "inter_group_collisions","type": "int",   "description": "Collisions detected during merge" }
     ]
   }

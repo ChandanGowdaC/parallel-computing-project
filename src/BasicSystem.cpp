@@ -1,6 +1,8 @@
 #include "BasicSystem.h"
 #include <stdlib.h>
 #include <boost/tokenizer.hpp>
+#include <numeric>
+#include <cmath>
 
 
 BasicSystem::BasicSystem(const BasicGraph& G, MAPFSolver& solver): G(G), solver(solver), num_of_tasks(0) {}
@@ -312,16 +314,23 @@ bool BasicSystem::congested() const
 	if (simulation_window <= 1)
 		return false;
     int wait_agents = 0;
-    for (const auto& path : paths)
+    int active_agents = 0;
+    for (int k = 0; k < num_of_drives; ++k)
     {
+        if (deadline_enabled && k < (int)agent_active_task.size() && agent_active_task[k] == -1)
+            continue; // Idle agents without assigned tasks are not congested
+
+        active_agents++;
         int t = 0;
-        while (t < simulation_window && path[timestep].location == path[timestep + t].location &&
-                path[timestep].orientation == path[timestep + t].orientation)
+        while (t < simulation_window && paths[k][timestep].location == paths[k][timestep + t].location &&
+                paths[k][timestep].orientation == paths[k][timestep + t].orientation)
             t++;
         if (t == simulation_window)
             wait_agents++;
     }
-    return wait_agents > num_of_drives / 2;  // more than half of drives didn't make progress
+    if (active_agents == 0)
+        return false;
+    return wait_agents > active_agents / 2;
 }
 
 // move all agents from start_timestep to end_timestep
@@ -364,7 +373,10 @@ list<tuple<int, int, int>> BasicSystem::move()
 				curr.timestep >= goal_locations[k].front().second) // the agent finish its current task
             {
                 goal_locations[k].erase(goal_locations[k].begin());
-				finished_tasks.emplace_back(k, curr.location, t);
+                if (!deadline_enabled || (k < (int)agent_active_task.size() && agent_active_task[k] != -1))
+                {
+				    finished_tasks.emplace_back(k, curr.location, t);
+                }
             }
 
             // check whether the move is valid
@@ -491,8 +503,10 @@ void BasicSystem::save_results()
         for (auto task : finished_tasks[k])
         {
             output << task.first << "," << task.second << ",";
-            if (task.second != 0)
-                output << G.heuristics.at(task.first)[prev];
+            if (task.second != 0) {
+                auto it = G.heuristics.find(task.first);
+                output << (it != G.heuristics.end() ? it->second[prev] : G.get_Manhattan_distance(task.first, prev));
+            }
             output << ";";
             prev = task.first;
         }
@@ -563,10 +577,96 @@ void BasicSystem::save_results()
     }
 
     saving_time = (std::clock() - t) / CLOCKS_PER_SEC;
+    overall_runtime = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - sim_start_time).count();
+    finish_metrics_logging();
 	if (screen)
 		std::cout << "Done! (" << saving_time << " s)" << std::endl;
 }
 
+
+void BasicSystem::init_metrics_logger()
+{
+    if (output_dir.empty())
+        output_dir = outfile;
+    if (output_dir.empty())
+        output_dir = "results/raw";
+
+    metrics::RunConfig config;
+    config.map_name = G.map_name;
+    auto slash_pos = config.map_name.rfind('/');
+    if (slash_pos != std::string::npos)
+        config.map_name = config.map_name.substr(slash_pos + 1);
+
+    config.scenario = scenario_name.empty() ? "KIVA" : scenario_name;
+    config.solver = solver.get_name();
+    config.solver_mode = parallel ? "parallel" : "sequential";
+    config.thread_count = parallel ? num_threads : 1;
+    config.agent_count = num_of_drives;
+    config.task_arrival_rate = deadline_enabled ? task_arrival_rate : 0.0;
+    config.planning_horizon_h = simulation_window;
+    config.planning_window_w = planning_window;
+    config.visibility_radius_v = parallel ? vis_radius : 0.0;
+    config.seed = seed;
+    config.scheduling_policy = deadline_enabled ? scheduling_policy : "NONE";
+    config.git_commit = git_commit;
+
+    metrics_logger = std::make_unique<metrics::MetricsLogger>(output_dir, config, run_id);
+}
+
+void BasicSystem::finish_metrics_logging()
+{
+    if (!metrics_logger)
+        return;
+
+    metrics::RunMetrics r;
+    r.simulation_timesteps = simulation_time;
+    r.total_runtime_ms = overall_runtime * 1000.0;
+    r.solver_runtime_ms = total_solver_time * 1000.0;
+    r.num_replan_episodes = num_replan_episodes;
+    r.num_tasks_generated = task_pool.size();
+    r.num_tasks_completed = num_of_tasks;
+    r.throughput = (simulation_time > 0) ? ((double)num_of_tasks / simulation_time) : 0.0;
+    r.num_groups = (num_replan_episodes > 0) ? std::max(1, total_group_count_sum / num_replan_episodes) : 1;
+    r.avg_group_size = (r.num_groups > 0) ? ((double)num_of_drives / r.num_groups) : num_of_drives;
+    r.max_group_solve_ms = max_group_solve_time_overall * 1000.0;
+    r.num_collisions = total_collisions;
+
+    if (deadline_enabled)
+    {
+        r.deadline_satisfaction_rate = deadline_metrics.deadline_satisfaction_rate();
+        r.avg_tardiness = deadline_metrics.avg_tardiness();
+        r.max_tardiness = deadline_metrics.max_tardiness();
+        r.num_tasks_overdue = deadline_metrics.tasks_overdue();
+
+        for (const auto& t : task_pool)
+        {
+            metrics::TaskMetrics tm;
+            tm.task_id = t.id;
+            tm.release_time = t.release_time;
+            tm.deadline = t.deadline;
+            tm.pickup_x = t.pickup_loc % G.cols;
+            tm.pickup_y = t.pickup_loc / G.cols;
+            tm.delivery_x = t.delivery_loc % G.cols;
+            tm.delivery_y = t.delivery_loc / G.cols;
+            tm.assigned_agent = t.assigned_agent;
+            tm.completion_time = t.finish_time;
+            tm.tardiness = t.tardiness(simulation_time);
+            tm.status = to_string(t.status);
+            tm.scheduling_policy = scheduling_policy;
+            metrics_logger->logTaskMetrics(tm);
+        }
+    }
+    else
+    {
+        r.deadline_satisfaction_rate = 1.0;
+        r.avg_tardiness = 0.0;
+        r.max_tardiness = 0;
+        r.num_tasks_overdue = 0;
+    }
+
+    metrics_logger->logRunMetrics(r);
+    metrics_logger->finalize();
+}
 
 void BasicSystem::update_travel_times(unordered_map<int, double>& travel_times)
 {
@@ -614,7 +714,69 @@ void BasicSystem::update_travel_times(unordered_map<int, double>& travel_times)
 }
 
 
+void BasicSystem::apply_planning_delay(int delta_t)
+{
+    if (delta_t <= 0)
+        return;
+
+    for (int k = 0; k < num_of_drives; ++k)
+    {
+        if (timestep >= (int)paths[k].size())
+            continue;
+
+        State current = paths[k][timestep];
+        std::vector<State> future_states;
+        for (int t = timestep + 1; t < (int)paths[k].size(); ++t)
+        {
+            future_states.push_back(paths[k][t]);
+        }
+
+        paths[k].resize(timestep + 1 + delta_t + future_states.size());
+        for (int s = 1; s <= delta_t; ++s)
+        {
+            paths[k][timestep + s] = State(current.location, timestep + s, current.orientation);
+        }
+        for (size_t i = 0; i < future_states.size(); ++i)
+        {
+            paths[k][timestep + 1 + delta_t + i] = future_states[i];
+            paths[k][timestep + 1 + delta_t + i].timestep = timestep + 1 + delta_t + i;
+        }
+    }
+}
+
 void BasicSystem::solve()
+{
+    auto t_start = std::chrono::steady_clock::now();
+
+    if (parallel && solver_factory)
+    {
+        solve_gd_rhcr();
+    }
+    else
+    {
+        solve_sequential();
+    }
+
+    auto t_end = std::chrono::steady_clock::now();
+    double t_plan = std::chrono::duration<double>(t_end - t_start).count();
+
+    if (realtime_coupling && planning_tau > 0.0)
+    {
+        double budget = simulation_window * planning_tau;
+        if (t_plan > budget)
+        {
+            int delta_t = static_cast<int>(std::ceil((t_plan - budget) / planning_tau));
+            budget_violations++;
+            total_budget_overrun_time += (t_plan - budget);
+            std::cout << "[RealTime-Coupling] Budget overrun at timestep " << timestep
+                      << ": plan took " << t_plan * 1000.0 << " ms (budget " << budget * 1000.0 
+                      << " ms). Delaying execution by " << delta_t << " timesteps." << std::endl;
+            apply_planning_delay(delta_t);
+        }
+    }
+}
+
+void BasicSystem::run_sequential_solve_core()
 {
     LRA_called = false;
 	LRAStar lra(G, solver.path_planner);
@@ -731,6 +893,233 @@ void BasicSystem::solve()
 										+ std::to_string(num_of_drives) + "," + std::to_string(seed));
 }
 
+void BasicSystem::solve_sequential()
+{
+    auto t_seq_start = std::chrono::steady_clock::now();
+    run_sequential_solve_core();
+    auto t_seq_end = std::chrono::steady_clock::now();
+    double seq_solve_ms = std::chrono::duration<double, std::milli>(t_seq_end - t_seq_start).count();
+    total_solver_time += seq_solve_ms / 1000.0;
+    num_replan_episodes++;
+    total_group_count_sum += 1;
+    max_group_solve_time_overall = std::max(max_group_solve_time_overall, seq_solve_ms / 1000.0);
+
+    if (metrics_logger) {
+        metrics::EpisodeMetrics em;
+        em.episode_id = episode_count++;
+        em.timestep = timestep;
+        em.num_groups = 1;
+        em.group_sizes = std::to_string(num_of_drives);
+        em.solve_time_ms = seq_solve_ms;
+        em.max_group_solve_ms = seq_solve_ms;
+        em.min_group_solve_ms = seq_solve_ms;
+        em.mean_group_solve_ms = seq_solve_ms;
+        em.t_partition_ms = 0.0;
+        em.t_dispatch_ms = 0.0;
+        em.t_barrier_wait_ms = 0.0;
+        em.merge_time_ms = 0.0;
+        em.t_serial_rest_ms = 0.0;
+        em.inter_group_collisions = 0;
+        metrics_logger->logEpisodeMetrics(em);
+    }
+}
+
+void BasicSystem::solve_gd_rhcr()
+{
+    if (hold_endpoints || useDummyPaths || solver.get_name() == "LRA")
+    {
+        solve_sequential();
+        return;
+    }
+
+    auto t_cycle_start = std::chrono::steady_clock::now();
+
+    // 1. All agents to plan
+    std::vector<int> agent_ids(num_of_drives);
+    std::iota(agent_ids.begin(), agent_ids.end(), 0);
+
+    // 2. Spatial partitioning into connected components
+    auto t_part_start = std::chrono::steady_clock::now();
+    auto groups = partition_agent_groups(G, starts, agent_ids, vis_radius);
+    auto t_part_end = std::chrono::steady_clock::now();
+    double t_part_ms = std::chrono::duration<double, std::milli>(t_part_end - t_part_start).count();
+
+    // Check sequential fallback threshold if configured
+    if (sequential_fallback_threshold > 0 && (int)groups.size() <= sequential_fallback_threshold) {
+        std::cout << "[GD-RHCR] Group count (" << groups.size() << ") <= fallback threshold ("
+                  << sequential_fallback_threshold << "). Running sequentially." << std::endl;
+        solve_sequential();
+        return;
+    }
+
+    // Log groups and dispatched solves per cycle
+    std::cout << "[GD-RHCR] Cycle at timestep " << timestep << ": " 
+              << groups.size() << " groups, " << groups.size() << " dispatched solves" << std::endl;
+
+    // 3. Create group planning tasks
+    auto t_tasks_start = std::chrono::steady_clock::now();
+    GroupPlanningConfig gp_config;
+    gp_config.simulation_window = simulation_window;
+    gp_config.planning_window = planning_window;
+    gp_config.time_limit = (timestep == 0) ? 10 * time_limit : time_limit;
+    gp_config.k_robust = k_robust;
+
+    auto tasks = make_group_planning_tasks(groups, starts, goal_locations, gp_config);
+
+    // Sort tasks in descending order of size (LPT scheduling to minimize makespan / barrier wait)
+    std::sort(tasks.begin(), tasks.end(), [](const GroupPlanningTask& a, const GroupPlanningTask& b) {
+        if (a.agent_ids.size() != b.agent_ids.size()) {
+            return a.agent_ids.size() > b.agent_ids.size();
+        }
+        return a.group_id < b.group_id; // deterministic tie-breaker
+    });
+
+    auto t_tasks_end = std::chrono::steady_clock::now();
+    double t_make_tasks_ms = std::chrono::duration<double, std::milli>(t_tasks_end - t_tasks_start).count();
+
+    // 4. Ensure persistent parallel executor exists
+    if (!parallel_executor) {
+        parallel_executor = std::make_unique<ParallelExecutor>(num_threads > 0 ? num_threads : 1);
+    }
+
+    // 5. Concurrent execution
+    auto res_pair = parallel_executor->parallel_map_timed(tasks, [this](const GroupPlanningTask& task) {
+        GroupPlanningResult res;
+        res.group_id = task.group_id;
+        auto t0 = std::chrono::steady_clock::now();
+
+        thread_local std::pair<std::unique_ptr<MAPFSolver>, std::unique_ptr<SingleAgentSolver>> tl_solver;
+        thread_local const BasicGraph* tl_graph = nullptr;
+        if (!tl_solver.first || tl_graph != &this->G) {
+            tl_solver = this->solver_factory->create();
+            tl_graph = &this->G;
+        }
+        auto& mapf = *tl_solver.first;
+        mapf.clear();
+        mapf.initial_constraints.clear();
+        mapf.window = task.planning_window;
+        mapf.k_robust = task.k_robust;
+        mapf.screen = 0;
+
+        if (task.k_robust > 0) {
+            for (size_t local_idx = 0; local_idx < task.agent_ids.size(); ++local_idx) {
+                int global_id = task.agent_ids[local_idx];
+                int prev_location = -1;
+                for (int t = this->timestep; t > std::max(0, this->timestep - task.k_robust); t--) {
+                    int curr_location = this->paths[global_id][t].location;
+                    if (curr_location < 0) continue;
+                    if (curr_location != prev_location) {
+                        mapf.initial_constraints.emplace_back(static_cast<int>(local_idx), curr_location, t + task.k_robust + 1 - this->timestep);
+                        prev_location = curr_location;
+                    }
+                }
+            }
+        }
+
+        bool sol = mapf.run(task.starts, task.goals, task.time_limit);
+        auto t1 = std::chrono::steady_clock::now();
+        res.runtime = std::chrono::duration<double>(t1 - t0).count();
+        res.success = sol;
+        if (sol) {
+            res.paths = mapf.solution;
+        } else {
+            res.error_message = "Solver failed or timed out for group " + std::to_string(task.group_id);
+        }
+        return res;
+    });
+    auto& results = res_pair.first;
+    auto& pstats = res_pair.second;
+
+    double t_dispatch_ms = t_make_tasks_ms + pstats.dispatch_time_ms;
+    double t_solve_wall_ms = pstats.wall_time_ms;
+    double t_barrier_wait_ms = pstats.barrier_wait_ms;
+
+    // 6. Compute group statistics
+    double min_group_ms = 1e9, max_group_ms = 0.0, sum_group_ms = 0.0;
+    for (const auto& r : results) {
+        double r_ms = r.runtime * 1000.0;
+        if (r_ms < min_group_ms) min_group_ms = r_ms;
+        if (r_ms > max_group_ms) max_group_ms = r_ms;
+        sum_group_ms += r_ms;
+    }
+    double mean_group_ms = results.empty() ? 0.0 : (sum_group_ms / results.size());
+    if (results.empty()) {
+        min_group_ms = 0.0;
+        max_group_ms = 0.0;
+    }
+
+    // 7. Merge and validate
+    auto t_merge_start = std::chrono::steady_clock::now();
+    std::vector<Path> candidate(num_of_drives);
+    std::string merge_error;
+    bool merge_success = merge_group_results(tasks, results, num_of_drives, candidate, &merge_error, planning_window);
+    auto t_merge_end = std::chrono::steady_clock::now();
+    double t_merge_ms = std::chrono::duration<double, std::milli>(t_merge_end - t_merge_start).count();
+
+    // 8. Commit or sequential fallback
+    int inter_group_collisions = 0;
+    double t_fallback_ms = 0.0;
+    if (!merge_success) {
+        std::cout << "[GD-RHCR] Merge/Solve failed at timestep " << timestep 
+                  << ": " << merge_error << ". Invoking sequential fallback." << std::endl;
+        if (merge_error.find("cell") != std::string::npos || merge_error.find("edge") != std::string::npos) {
+            inter_group_collisions = 1;
+        }
+        num_fallback_invocations++;
+        // Fallback to sequential solve
+        auto t_fb_start = std::chrono::steady_clock::now();
+        run_sequential_solve_core();
+        auto t_fb_end = std::chrono::steady_clock::now();
+        t_fallback_ms = std::chrono::duration<double, std::milli>(t_fb_end - t_fb_start).count();
+        total_solver_time += (t_solve_wall_ms + t_fallback_ms) / 1000.0;
+        num_replan_episodes++;
+    } else {
+        update_paths(candidate);
+        std::ofstream stats(outfile + "/solver.csv", std::ios::app);
+        if (stats.is_open()) {
+            stats << (t_solve_wall_ms / 1000.0) << ",0,0,0,0,0,0,0,0," 
+                  << std::to_string(timestep) + "," + std::to_string(num_of_drives) + "," + std::to_string(seed)
+                  << std::endl;
+        }
+        num_replan_episodes++;
+        total_solver_time += t_solve_wall_ms / 1000.0;
+    }
+
+    total_group_count_sum += groups.size();
+    total_dispatched_group_solves += tasks.size();
+    max_group_solve_time_overall = std::max(max_group_solve_time_overall, max_group_ms / 1000.0);
+    total_collisions += inter_group_collisions;
+
+    std::string group_sizes_str;
+    for (size_t i = 0; i < groups.size(); ++i) {
+        if (i > 0) group_sizes_str += ",";
+        group_sizes_str += std::to_string(groups[i].size());
+    }
+
+    auto t_cycle_end = std::chrono::steady_clock::now();
+    double t_cycle_total_ms = std::chrono::duration<double, std::milli>(t_cycle_end - t_cycle_start).count();
+    double t_serial_rest_ms = std::max(0.0, t_cycle_total_ms - (t_part_ms + t_dispatch_ms + t_solve_wall_ms + t_merge_ms));
+
+    if (metrics_logger) {
+        metrics::EpisodeMetrics em;
+        em.episode_id = episode_count++;
+        em.timestep = timestep;
+        em.num_groups = static_cast<int>(groups.size());
+        em.group_sizes = group_sizes_str;
+        em.solve_time_ms = t_solve_wall_ms + t_fallback_ms;
+        em.max_group_solve_ms = max_group_ms;
+        em.min_group_solve_ms = min_group_ms;
+        em.mean_group_solve_ms = mean_group_ms;
+        em.t_partition_ms = t_part_ms;
+        em.t_dispatch_ms = t_dispatch_ms;
+        em.t_barrier_wait_ms = t_barrier_wait_ms;
+        em.merge_time_ms = t_merge_ms;
+        em.t_serial_rest_ms = t_serial_rest_ms;
+        em.inter_group_collisions = inter_group_collisions;
+        metrics_logger->logEpisodeMetrics(em);
+    }
+}
+
 bool BasicSystem::solve_by_WHCA(vector<Path>& planned_paths,
 	const vector<State>& new_starts, const vector< vector<pair<int, int> > >& new_goal_locations)
 {
@@ -796,6 +1185,13 @@ void BasicSystem::initialize_solvers()
 	solver.initial_rt.map_size = G.size();
 	solver.initial_rt.k_robust = k_robust;
 	solver.initial_rt.window = INT_MAX;
+
+	if (parallel)
+	{
+		parallel_executor = std::make_unique<ParallelExecutor>(num_threads > 0 ? num_threads : 1);
+	}
+
+	init_metrics_logger();
 }
 
 bool BasicSystem::load_records()

@@ -48,6 +48,11 @@ if [[ "${BUILD_DIR}" != "${PROJECT_ROOT}/build" ]]; then
     ln -sfn "${BUILD_DIR}/test_thread_pool" "${PROJECT_ROOT}/build/test_thread_pool"
     ln -sfn "${BUILD_DIR}/test_parallel_executor" "${PROJECT_ROOT}/build/test_parallel_executor"
     ln -sfn "${BUILD_DIR}/test_interfaces" "${PROJECT_ROOT}/build/test_interfaces"
+    ln -sfn "${BUILD_DIR}/test_deadline_workload" "${PROJECT_ROOT}/build/test_deadline_workload"
+    ln -sfn "${BUILD_DIR}/test_gd_rhcr" "${PROJECT_ROOT}/build/test_gd_rhcr"
+    ln -sfn "${BUILD_DIR}/test_gd_rhcr_dispatch" "${PROJECT_ROOT}/build/test_gd_rhcr_dispatch"
+    ln -sfn "${BUILD_DIR}/test_realtime_coupling" "${PROJECT_ROOT}/build/test_realtime_coupling"
+    ln -sfn "${BUILD_DIR}/test_c4_group_partition" "${PROJECT_ROOT}/build/test_c4_group_partition"
 fi
 
 echo ""

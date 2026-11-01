@@ -44,6 +44,7 @@ void KivaSystem::initialize_start_locations()
 	// Choose random start locations
 	// Any non-obstacle locations can be start locations
 	// Start locations should be unique
+	std::vector<bool> used(G.size(), false);
 	for (int k = 0; k < num_of_drives; k++)
 	{
 		int orientation = -1;
@@ -51,9 +52,21 @@ void KivaSystem::initialize_start_locations()
 		{
 			orientation = rand() % 4;
 		}
-		starts[k] = State(G.agent_home_locations[k], 0, orientation);
+		int loc = -1;
+		if (k < (int)G.agent_home_locations.size())
+		{
+			loc = G.agent_home_locations[k];
+		}
+		else
+		{
+			do {
+				loc = rand() % G.size();
+			} while (used[loc] || G.types[loc] == "Obstacle");
+		}
+		used[loc] = true;
+		starts[k] = State(loc, 0, orientation);
 		paths[k].emplace_back(starts[k]);
-		finished_tasks[k].emplace_back(G.agent_home_locations[k], 0);
+		finished_tasks[k].emplace_back(loc, 0);
 	}
 }
 
@@ -191,6 +204,15 @@ void KivaSystem::update_goal_locations()
 				}
 			}
 
+			// Ensure every agent has at least one goal (stay in place for planning window if idle)
+			for (int k = 0; k < num_of_drives; ++k)
+			{
+				if (goal_locations[k].empty())
+				{
+					goal_locations[k].emplace_back(paths[k][timestep].location, planning_window);
+				}
+			}
+
 			// 4. Update status of unassigned/active tasks and record snapshot
 			task_scheduler->update_task_statuses(task_pool, timestep);
 			deadline_metrics.snapshot(timestep);
@@ -233,7 +255,7 @@ void KivaSystem::update_goal_locations()
 					{
 						// assign a new task
 						pair<int, int> next;
-						if (G.types[goal.first] == "Endpoint")
+						if (G.types[goal.first] == "Endpoint" || G.types[goal.first] == "Home" || G.types[goal.first] == "Travel")
 						{
 							do
 							{
@@ -282,7 +304,6 @@ void KivaSystem::simulate(int simulation_time)
 			int id, loc, t;
 			std::tie(id, loc, t) = task;
 			finished_tasks[id].emplace_back(loc, t);
-			num_of_tasks++;
 			if (hold_endpoints)
 				held_endpoints.erase(loc);
 
@@ -297,8 +318,13 @@ void KivaSystem::simulate(int simulation_time)
 						task_pool[tid].status = TaskStatus::COMPLETED;
 						deadline_metrics.on_task_completed(task_pool[tid], t);
 						agent_active_task[id] = -1; // marked idle for next replan
+						num_of_tasks++;
 					}
 				}
+			}
+			else if (!deadline_enabled)
+			{
+				num_of_tasks++;
 			}
 		}
 

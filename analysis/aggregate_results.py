@@ -28,7 +28,7 @@ def load_summary_csv(path):
         for row in reader:
             # Cast numeric fields
             for key in row:
-                if key in ("run_id", "timestamp", "map_name", "scenario", "solver",
+                if key in ("run_id", "timestamp", "git_commit", "map_name", "scenario", "solver",
                            "solver_mode", "scheduling_policy", "status"):
                     continue
                 try:
@@ -45,13 +45,15 @@ def load_summary_csv(path):
 def load_individual_runs(input_dir):
     """Load all individual run_*.csv files and merge."""
     rows = []
-    pattern = os.path.join(input_dir, "run_*.csv")
-    for filepath in sorted(glob.glob(pattern)):
+    if not os.path.exists(input_dir):
+        return rows
+    files = [os.path.join(input_dir, f) for f in os.listdir(input_dir) if f.startswith("run_") and f.endswith(".csv")]
+    for filepath in sorted(files):
         with open(filepath, "r") as f:
             reader = csv.DictReader(f)
             for row in reader:
                 for key in row:
-                    if key in ("run_id", "timestamp", "map_name", "scenario", "solver",
+                    if key in ("run_id", "timestamp", "git_commit", "map_name", "scenario", "solver",
                                "solver_mode", "scheduling_policy", "status"):
                         continue
                     try:
@@ -258,7 +260,7 @@ def main():
     print(f"Loaded {len(rows)} experiment runs")
     
     if not rows:
-        print("ERROR: No data found. Run generate_stub_data.py first or check paths.")
+        print("ERROR: No data found. Execute experiment runs first or check paths.")
         return
     
     # Aggregate
