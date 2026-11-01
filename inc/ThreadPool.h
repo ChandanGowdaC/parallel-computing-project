@@ -11,6 +11,12 @@
 #include <functional>
 #include <stdexcept>
 
+class ThreadPool;
+inline int& get_worker_id() {
+    static thread_local int wid = -1;
+    return wid;
+}
+
 class ThreadPool {
 public:
     ThreadPool(size_t);
@@ -36,8 +42,9 @@ inline ThreadPool::ThreadPool(size_t threads)
 {
     for(size_t i = 0;i<threads;++i)
         workers.emplace_back(
-            [this]
+            [this, i]
             {
+                get_worker_id() = static_cast<int>(i);
                 for(;;)
                 {
                     std::function<void()> task;

@@ -103,6 +103,13 @@ struct EpisodeMetrics {
     double merge_time_ms          = 0.0;
     double t_serial_rest_ms       = 0.0;
     int inter_group_collisions    = 0;
+    int groups_before             = 1;
+    int groups_after              = 1;
+    int merges_performed          = 0;
+    double local_resolve_time_ms  = 0.0;
+    double global_fallback_time_ms = 0.0;
+    int global_fallback_invoked   = 0;
+    std::string per_worker_busy_ms;
 };
 
 
@@ -146,7 +153,8 @@ public:
             episode_file_ << "run_id,episode_id,timestep,num_groups,group_sizes,"
                           << "solve_time_ms,max_group_solve_ms,min_group_solve_ms,mean_group_solve_ms,"
                           << "t_partition_ms,t_dispatch_ms,t_barrier_wait_ms,merge_time_ms,t_serial_rest_ms,"
-                          << "inter_group_collisions\n";
+                          << "inter_group_collisions,groups_before,groups_after,merges_performed,"
+                          << "local_resolve_time_ms,global_fallback_time_ms,global_fallback_invoked,per_worker_busy_ms\n";
         }
     }
 
@@ -189,7 +197,14 @@ public:
                       << e.t_barrier_wait_ms << ","
                       << e.merge_time_ms << ","
                       << e.t_serial_rest_ms << ","
-                      << e.inter_group_collisions << "\n";
+                      << e.inter_group_collisions << ","
+                      << e.groups_before << ","
+                      << e.groups_after << ","
+                      << e.merges_performed << ","
+                      << e.local_resolve_time_ms << ","
+                      << e.global_fallback_time_ms << ","
+                      << e.global_fallback_invoked << ","
+                      << "\"" << e.per_worker_busy_ms << "\"\n";
     }
 
     // ── Run-level summary (called once at end of run) ──

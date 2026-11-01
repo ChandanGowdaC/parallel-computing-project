@@ -8,6 +8,7 @@
 #include <unordered_set>
 #include <utility>
 #include <vector>
+#include <numeric>
 
 #include "BasicGraph.h"
 #include "ParallelExecutor.h"
@@ -163,6 +164,95 @@ inline std::vector<GroupPlanningResult> solve_group_tasks(
     return executor.parallel_map(tasks, [&group_solver](const GroupPlanningTask& task) {
         return group_solver(task);
     });
+}
+
+// Helper Disjoint Set Union (DSU) structure for group merging
+struct DisjointSet {
+    std::vector<int> parent;
+    explicit DisjointSet(int n) : parent(n) {
+        std::iota(parent.begin(), parent.end(), 0);
+    }
+    int find(int i) {
+        if (parent[i] == i) return i;
+        return parent[i] = find(parent[i]);
+    }
+    bool unite(int i, int j) {
+        int root_i = find(i);
+        int root_j = find(j);
+        if (root_i != root_j) {
+            parent[root_i] = root_j;
+            return true;
+        }
+        return false;
+    }
+};
+
+// Fast O(N * w) conflict detection between groups
+inline bool find_inter_group_conflicts(
+    const std::vector<Path>& paths,
+    const std::vector<int>& agent_to_group,
+    std::vector<std::pair<int, int>>& conflicting_groups,
+    int window = -1) {
+    
+    std::size_t max_time = 0;
+    for (const auto& p : paths) {
+        if (p.size() > max_time) max_time = p.size();
+    }
+    if (window > 0 && max_time > static_cast<std::size_t>(window + 1)) {
+        max_time = static_cast<std::size_t>(window + 1);
+    }
+    if (max_time == 0) return true;
+
+    std::unordered_map<int, int> cell_occupancy;
+    std::unordered_map<long long, int> edge_moves;
+
+    for (std::size_t time = 0; time < max_time; ++time) {
+        cell_occupancy.clear();
+        edge_moves.clear();
+
+        // 1. Vertex collisions
+        for (std::size_t a = 0; a < paths.size(); ++a) {
+            if (paths[a].empty()) continue;
+            int loc = (time < paths[a].size()) ? paths[a][time].location : paths[a].back().location;
+            if (loc < 0) continue;
+            auto it = cell_occupancy.find(loc);
+            if (it != cell_occupancy.end()) {
+                int first = it->second;
+                int second = static_cast<int>(a);
+                int g1 = (first >= 0 && first < static_cast<int>(agent_to_group.size())) ? agent_to_group[first] : -1;
+                int g2 = (second >= 0 && second < static_cast<int>(agent_to_group.size())) ? agent_to_group[second] : -1;
+                if (g1 >= 0 && g2 >= 0) {
+                    conflicting_groups.emplace_back(g1, g2);
+                }
+            }
+            cell_occupancy.emplace(loc, static_cast<int>(a));
+        }
+
+        // 2. Edge swap collisions
+        if (time + 1 < max_time) {
+            for (std::size_t a = 0; a < paths.size(); ++a) {
+                if (time + 1 >= paths[a].size()) continue;
+                int u = paths[a][time].location;
+                int v = paths[a][time + 1].location;
+                if (u == v || u < 0 || v < 0) continue;
+
+                long long reverse_edge = (static_cast<long long>(v) << 32) | static_cast<unsigned int>(u);
+                auto it = edge_moves.find(reverse_edge);
+                if (it != edge_moves.end()) {
+                    int first = it->second;
+                    int second = static_cast<int>(a);
+                    int g1 = (first >= 0 && first < static_cast<int>(agent_to_group.size())) ? agent_to_group[first] : -1;
+                    int g2 = (second >= 0 && second < static_cast<int>(agent_to_group.size())) ? agent_to_group[second] : -1;
+                    if (g1 >= 0 && g2 >= 0) {
+                        conflicting_groups.emplace_back(g1, g2);
+                    }
+                }
+                long long forward_edge = (static_cast<long long>(u) << 32) | static_cast<unsigned int>(v);
+                edge_moves.emplace(forward_edge, static_cast<int>(a));
+            }
+        }
+    }
+    return conflicting_groups.empty();
 }
 
 inline bool validate_joint_paths(

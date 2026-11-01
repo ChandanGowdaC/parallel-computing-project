@@ -41,6 +41,8 @@ lifelong.vcxproj.user
 # Ignore experiment output runs and raw per-run CSVs (keep tracked config & scripts)
 exp/
 results/raw/*.csv
+results/raw/*.txt
+maps/tiled/*_heuristics_table.txt
 results/logs/
 results/profiling_raw/
 results/test_perf/

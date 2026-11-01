@@ -77,7 +77,14 @@
       { "name": "t_barrier_wait_ms",    "type": "float",  "description": "Time spent waiting at thread-pool synchronization barrier" },
       { "name": "merge_time_ms",        "type": "float",  "description": "Time to merge group results and check conflicts" },
       { "name": "t_serial_rest_ms",     "type": "float",  "description": "Remaining serial overhead outside parallel solve" },
-      { "name": "inter_group_collisions","type": "int",   "description": "Collisions detected during merge" }
+      { "name": "inter_group_collisions","type": "int",   "description": "Collisions detected during merge" },
+      { "name": "groups_before",        "type": "int",    "description": "Groups count before local merging", "optional": true },
+      { "name": "groups_after",         "type": "int",    "description": "Groups count after local merging", "optional": true },
+      { "name": "merges_performed",     "type": "int",    "description": "Count of group merges performed during local resolution", "optional": true },
+      { "name": "local_resolve_time_ms", "type": "float", "description": "Wall-clock time spent in local re-solves", "optional": true },
+      { "name": "global_fallback_time_ms","type": "float","description": "Wall-clock time spent in global fallback", "optional": true },
+      { "name": "global_fallback_invoked","type": "int",  "description": "1 if global fallback was invoked, 0 otherwise", "optional": true },
+      { "name": "per_worker_busy_ms",   "type": "string", "description": "Semicolon-separated per-worker busy times in milliseconds", "optional": true }
     ]
   }
 }

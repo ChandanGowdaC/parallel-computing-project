@@ -21,6 +21,7 @@ struct GroupPlanningTask {
 // Result returned by solving a single group's windowed MAPF problem
 struct GroupPlanningResult {
     int group_id;                                        // ID matching GroupPlanningTask
+    int worker_id = -1;                                  // Worker thread ID that executed this task
     bool success = false;                                // Whether valid conflict-free paths were found
     double runtime = 0.0;                                // CPU/wall-clock time taken for this group solve (seconds)
     std::vector<Path> paths;                             // Resulting paths (indexed 0..group_size-1)

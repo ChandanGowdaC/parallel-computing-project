@@ -70,26 +70,23 @@ def verify_paths(path_file):
 
         # 2. Edge swap conflict check between t and t+1
         if t < max_t:
-            for a1 in range(num_agents):
-                traj1 = agent_paths.get(a1, {})
-                loc1_t = get_agent_loc(traj1, t)
-                loc1_next = get_agent_loc(traj1, t + 1)
-                if loc1_t < 0 or loc1_next < 0 or loc1_t == loc1_next:
+            edge_moves = {}
+            for a_id in range(num_agents):
+                traj = agent_paths.get(a_id, {})
+                loc_t = get_agent_loc(traj, t)
+                loc_next = get_agent_loc(traj, t + 1)
+                if loc_t < 0 or loc_next < 0 or loc_t == loc_next:
                     continue
 
-                for a2 in range(a1 + 1, num_agents):
-                    traj2 = agent_paths.get(a2, {})
-                    loc2_t = get_agent_loc(traj2, t)
-                    loc2_next = get_agent_loc(traj2, t + 1)
-                    if loc2_t < 0 or loc2_next < 0 or loc2_t == loc2_next:
-                        continue
-
-                    # Swap check: a1 moves loc1_t -> loc1_next, a2 moves loc2_t -> loc2_next
-                    if loc1_t == loc2_next and loc2_t == loc1_next:
-                        violations.append(
-                            f"Edge swap collision between t={t} and t={t+1}: agent {a1} ({loc1_t}->{loc1_next}) "
-                            f"and agent {a2} ({loc2_t}->{loc2_next})"
-                        )
+                # Check if another agent moved loc_next -> loc_t
+                if (loc_next, loc_t) in edge_moves:
+                    other_a = edge_moves[(loc_next, loc_t)]
+                    violations.append(
+                        f"Edge swap collision between t={t} and t={t+1}: agent {other_a} ({loc_next}->{loc_t}) "
+                        f"and agent {a_id} ({loc_t}->{loc_next})"
+                    )
+                else:
+                    edge_moves[(loc_t, loc_next)] = a_id
 
     if violations:
         print(f"[VERIFIER FAILED] {len(violations)} collisions found in {path_file}:", file=sys.stderr)

@@ -75,6 +75,9 @@ public:
     double max_group_solve_time_overall = 0.0;
     int total_dispatched_group_solves = 0;
     int num_fallback_invocations = 0;
+    int total_local_merges = 0;
+    double total_local_resolve_time_ms = 0.0;
+    double total_global_fallback_time_ms = 0.0;
     int sequential_fallback_threshold = 0;
     int budget_violations = 0;
     double total_budget_overrun_time = 0.0;

@@ -956,36 +956,31 @@ void BasicSystem::solve_gd_rhcr()
     std::cout << "[GD-RHCR] Cycle at timestep " << timestep << ": " 
               << groups.size() << " groups, " << groups.size() << " dispatched solves" << std::endl;
 
-    // 3. Create group planning tasks
-    auto t_tasks_start = std::chrono::steady_clock::now();
+    int groups_before = static_cast<int>(groups.size());
+    int groups_after = groups_before;
+    int merges_performed = 0;
+    double local_resolve_time_ms = 0.0;
+    double global_fallback_time_ms = 0.0;
+    int global_fallback_invoked = 0;
+
+    // 3. Create group planning config
     GroupPlanningConfig gp_config;
     gp_config.simulation_window = simulation_window;
     gp_config.planning_window = planning_window;
     gp_config.time_limit = (timestep == 0) ? 10 * time_limit : time_limit;
     gp_config.k_robust = k_robust;
 
-    auto tasks = make_group_planning_tasks(groups, starts, goal_locations, gp_config);
-
-    // Sort tasks in descending order of size (LPT scheduling to minimize makespan / barrier wait)
-    std::sort(tasks.begin(), tasks.end(), [](const GroupPlanningTask& a, const GroupPlanningTask& b) {
-        if (a.agent_ids.size() != b.agent_ids.size()) {
-            return a.agent_ids.size() > b.agent_ids.size();
-        }
-        return a.group_id < b.group_id; // deterministic tie-breaker
-    });
-
-    auto t_tasks_end = std::chrono::steady_clock::now();
-    double t_make_tasks_ms = std::chrono::duration<double, std::milli>(t_tasks_end - t_tasks_start).count();
-
     // 4. Ensure persistent parallel executor exists
     if (!parallel_executor) {
         parallel_executor = std::make_unique<ParallelExecutor>(num_threads > 0 ? num_threads : 1);
     }
+    size_t actual_threads = num_threads > 0 ? num_threads : 1;
+    std::vector<double> worker_busy(actual_threads, 0.0);
 
-    // 5. Concurrent execution
-    auto res_pair = parallel_executor->parallel_map_timed(tasks, [this](const GroupPlanningTask& task) {
+    auto solve_task_fn = [this](const GroupPlanningTask& task) {
         GroupPlanningResult res;
         res.group_id = task.group_id;
+        res.worker_id = get_worker_id();
         auto t0 = std::chrono::steady_clock::now();
 
         thread_local std::pair<std::unique_ptr<MAPFSolver>, std::unique_ptr<SingleAgentSolver>> tl_solver;
@@ -1026,7 +1021,20 @@ void BasicSystem::solve_gd_rhcr()
             res.error_message = "Solver failed or timed out for group " + std::to_string(task.group_id);
         }
         return res;
+    };
+
+    // Initial group tasks
+    auto t_tasks_start = std::chrono::steady_clock::now();
+    auto tasks = make_group_planning_tasks(groups, starts, goal_locations, gp_config);
+    std::sort(tasks.begin(), tasks.end(), [](const GroupPlanningTask& a, const GroupPlanningTask& b) {
+        if (a.agent_ids.size() != b.agent_ids.size()) return a.agent_ids.size() > b.agent_ids.size();
+        return a.group_id < b.group_id;
     });
+    auto t_tasks_end = std::chrono::steady_clock::now();
+    double t_make_tasks_ms = std::chrono::duration<double, std::milli>(t_tasks_end - t_tasks_start).count();
+
+    // 5. Initial Parallel Solve
+    auto res_pair = parallel_executor->parallel_map_timed(tasks, solve_task_fn);
     auto& results = res_pair.first;
     auto& pstats = res_pair.second;
 
@@ -1034,61 +1042,212 @@ void BasicSystem::solve_gd_rhcr()
     double t_solve_wall_ms = pstats.wall_time_ms;
     double t_barrier_wait_ms = pstats.barrier_wait_ms;
 
-    // 6. Compute group statistics
-    double min_group_ms = 1e9, max_group_ms = 0.0, sum_group_ms = 0.0;
+    // Track initial worker busy times
     for (const auto& r : results) {
-        double r_ms = r.runtime * 1000.0;
-        if (r_ms < min_group_ms) min_group_ms = r_ms;
-        if (r_ms > max_group_ms) max_group_ms = r_ms;
-        sum_group_ms += r_ms;
-    }
-    double mean_group_ms = results.empty() ? 0.0 : (sum_group_ms / results.size());
-    if (results.empty()) {
-        min_group_ms = 0.0;
-        max_group_ms = 0.0;
-    }
-
-    // 7. Merge and validate
-    auto t_merge_start = std::chrono::steady_clock::now();
-    std::vector<Path> candidate(num_of_drives);
-    std::string merge_error;
-    bool merge_success = merge_group_results(tasks, results, num_of_drives, candidate, &merge_error, planning_window);
-    auto t_merge_end = std::chrono::steady_clock::now();
-    double t_merge_ms = std::chrono::duration<double, std::milli>(t_merge_end - t_merge_start).count();
-
-    // 8. Commit or sequential fallback
-    int inter_group_collisions = 0;
-    double t_fallback_ms = 0.0;
-    if (!merge_success) {
-        std::cout << "[GD-RHCR] Merge/Solve failed at timestep " << timestep 
-                  << ": " << merge_error << ". Invoking sequential fallback." << std::endl;
-        if (merge_error.find("cell") != std::string::npos || merge_error.find("edge") != std::string::npos) {
-            inter_group_collisions = 1;
+        int wid = r.worker_id;
+        if (wid >= 0 && wid < (int)worker_busy.size()) {
+            worker_busy[wid] += r.runtime * 1000.0;
+        } else if (worker_busy.size() == 1) {
+            worker_busy[0] += r.runtime * 1000.0;
         }
-        num_fallback_invocations++;
-        // Fallback to sequential solve
-        auto t_fb_start = std::chrono::steady_clock::now();
-        run_sequential_solve_core();
-        auto t_fb_end = std::chrono::steady_clock::now();
-        t_fallback_ms = std::chrono::duration<double, std::milli>(t_fb_end - t_fb_start).count();
-        total_solver_time += (t_solve_wall_ms + t_fallback_ms) / 1000.0;
-        num_replan_episodes++;
-    } else {
+    }
+
+    // Candidate paths and agent mapping
+    std::vector<Path> candidate(num_of_drives);
+    std::vector<int> agent_to_group(num_of_drives, -1);
+    for (size_t g = 0; g < groups.size(); ++g) {
+        for (int a : groups[g]) {
+            agent_to_group[a] = static_cast<int>(g);
+        }
+    }
+
+    bool all_solves_ok = true;
+    std::unordered_map<int, const GroupPlanningTask*> task_by_id;
+    for (const auto& t : tasks) {
+        task_by_id[t.group_id] = &t;
+    }
+    for (const auto& r : results) {
+        if (!r.success) {
+            all_solves_ok = false;
+            break;
+        }
+        auto it = task_by_id.find(r.group_id);
+        if (it == task_by_id.end()) {
+            all_solves_ok = false;
+            break;
+        }
+        const auto* t = it->second;
+        for (size_t i = 0; i < t->agent_ids.size(); ++i) {
+            candidate[t->agent_ids[i]] = r.paths[i];
+        }
+    }
+
+    // 6. Check initial conflicts
+    std::vector<std::pair<int, int>> conflicts;
+    bool conflict_free = false;
+    if (all_solves_ok) {
+        conflict_free = find_inter_group_conflicts(candidate, agent_to_group, conflicts, planning_window);
+    }
+
+    // 7. Local Conflict Resolution Loop
+    const int max_local_iterations = 3;
+    int local_iter = 0;
+
+    while (all_solves_ok && !conflict_free && local_iter < max_local_iterations) {
+        local_iter++;
+        int curr_n_groups = static_cast<int>(groups.size());
+        DisjointSet dsu(curr_n_groups);
+        for (const auto& c : conflicts) {
+            if (c.first >= 0 && c.first < curr_n_groups && c.second >= 0 && c.second < curr_n_groups) {
+                dsu.unite(c.first, c.second);
+            }
+        }
+
+        std::unordered_map<int, std::vector<int>> comp_map;
+        for (int g = 0; g < curr_n_groups; ++g) {
+            comp_map[dsu.find(g)].push_back(g);
+        }
+
+        // If entire set of groups collapsed into a single group, stop local resolution and fallback
+        if (comp_map.size() == 1 && comp_map.begin()->second.size() == static_cast<size_t>(curr_n_groups)) {
+            break;
+        }
+
+        std::vector<std::vector<int>> next_groups;
+        std::vector<size_t> dirty_group_indices;
+
+        for (auto& kv : comp_map) {
+            const auto& old_indices = kv.second;
+            if (old_indices.size() == 1) {
+                next_groups.push_back(groups[old_indices[0]]);
+            } else {
+                merges_performed += static_cast<int>(old_indices.size() - 1);
+                std::vector<int> merged_agents;
+                for (int og : old_indices) {
+                    merged_agents.insert(merged_agents.end(), groups[og].begin(), groups[og].end());
+                }
+                std::sort(merged_agents.begin(), merged_agents.end());
+                dirty_group_indices.push_back(next_groups.size());
+                next_groups.push_back(std::move(merged_agents));
+            }
+        }
+
+        groups = std::move(next_groups);
+        for (size_t g = 0; g < groups.size(); ++g) {
+            for (int a : groups[g]) {
+                agent_to_group[a] = static_cast<int>(g);
+            }
+        }
+
+        if (dirty_group_indices.empty()) {
+            conflict_free = true;
+            break;
+        }
+
+        // Prepare tasks for newly merged groups
+        std::vector<std::vector<int>> dirty_groups;
+        dirty_groups.reserve(dirty_group_indices.size());
+        for (size_t d_idx : dirty_group_indices) {
+            dirty_groups.push_back(groups[d_idx]);
+        }
+        auto re_tasks = make_group_planning_tasks(dirty_groups, starts, goal_locations, gp_config);
+        for (size_t i = 0; i < re_tasks.size(); ++i) {
+            re_tasks[i].group_id = static_cast<int>(dirty_group_indices[i]);
+        }
+        std::sort(re_tasks.begin(), re_tasks.end(), [](const GroupPlanningTask& a, const GroupPlanningTask& b) {
+            if (a.agent_ids.size() != b.agent_ids.size()) return a.agent_ids.size() > b.agent_ids.size();
+            return a.group_id < b.group_id;
+        });
+
+        // Re-solve dirty groups
+        auto t_re_start = std::chrono::steady_clock::now();
+        auto re_res_pair = parallel_executor->parallel_map_timed(re_tasks, solve_task_fn);
+        auto t_re_end = std::chrono::steady_clock::now();
+        local_resolve_time_ms += std::chrono::duration<double, std::milli>(t_re_end - t_re_start).count();
+
+        for (const auto& r : re_res_pair.first) {
+            int wid = r.worker_id;
+            if (wid >= 0 && wid < (int)worker_busy.size()) {
+                worker_busy[wid] += r.runtime * 1000.0;
+            } else if (worker_busy.size() == 1) {
+                worker_busy[0] += r.runtime * 1000.0;
+            }
+        }
+
+        bool re_solves_ok = true;
+        for (const auto& r : re_res_pair.first) {
+            if (!r.success) {
+                re_solves_ok = false;
+                break;
+            }
+            const auto& g_agents = groups[r.group_id];
+            for (size_t i = 0; i < g_agents.size(); ++i) {
+                candidate[g_agents[i]] = r.paths[i];
+            }
+        }
+
+        if (!re_solves_ok) {
+            all_solves_ok = false;
+            break;
+        }
+
+        conflicts.clear();
+        conflict_free = find_inter_group_conflicts(candidate, agent_to_group, conflicts, planning_window);
+    }
+
+    groups_after = static_cast<int>(groups.size());
+
+    // 8. Final Validation and Fallback Check
+    std::string final_err;
+    bool final_valid = all_solves_ok && conflict_free && validate_joint_paths(candidate, &final_err, planning_window);
+
+    int inter_group_collisions = 0;
+    if (final_valid) {
+        // Local resolution succeeded
         update_paths(candidate);
+        total_solver_time += (t_solve_wall_ms + local_resolve_time_ms) / 1000.0;
+        num_replan_episodes++;
+        global_fallback_invoked = 0;
+        global_fallback_time_ms = 0.0;
         std::ofstream stats(outfile + "/solver.csv", std::ios::app);
         if (stats.is_open()) {
-            stats << (t_solve_wall_ms / 1000.0) << ",0,0,0,0,0,0,0,0," 
+            stats << ((t_solve_wall_ms + local_resolve_time_ms) / 1000.0) << ",0,0,0,0,0,0,0,0,"
                   << std::to_string(timestep) + "," + std::to_string(num_of_drives) + "," + std::to_string(seed)
                   << std::endl;
         }
+    } else {
+        // Global fallback as last resort
+        std::cout << "[GD-RHCR] Local resolution exhausted or group solve failed at timestep " << timestep 
+                  << ": " << final_err << " (merges=" << merges_performed << "). Invoking global sequential fallback." << std::endl;
+        inter_group_collisions = 1;
+        num_fallback_invocations++;
+        global_fallback_invoked = 1;
+
+        auto t_fb_start = std::chrono::steady_clock::now();
+        run_sequential_solve_core();
+        auto t_fb_end = std::chrono::steady_clock::now();
+        global_fallback_time_ms = std::chrono::duration<double, std::milli>(t_fb_end - t_fb_start).count();
+        total_solver_time += (t_solve_wall_ms + local_resolve_time_ms + global_fallback_time_ms) / 1000.0;
         num_replan_episodes++;
-        total_solver_time += t_solve_wall_ms / 1000.0;
     }
 
-    total_group_count_sum += groups.size();
+    std::cout << "[GD-RHCR] Cycle at timestep " << timestep << ": "
+              << groups_before << " -> " << groups_after << " groups ("
+              << merges_performed << " merges, local re-solve: " << local_resolve_time_ms << " ms"
+              << (global_fallback_invoked ? ", global fallback: " + std::to_string(global_fallback_time_ms) + " ms" : ", 0 global fallback")
+              << ")" << std::endl;
+
+    total_group_count_sum += groups_after;
     total_dispatched_group_solves += tasks.size();
-    max_group_solve_time_overall = std::max(max_group_solve_time_overall, max_group_ms / 1000.0);
-    total_collisions += inter_group_collisions;
+
+    // Per-worker busy string
+    std::string per_worker_busy_str;
+    for (size_t i = 0; i < worker_busy.size(); ++i) {
+        if (i > 0) per_worker_busy_str += ";";
+        std::ostringstream ss;
+        ss << std::fixed << std::setprecision(2) << worker_busy[i];
+        per_worker_busy_str += ss.str();
+    }
 
     std::string group_sizes_str;
     for (size_t i = 0; i < groups.size(); ++i) {
@@ -1098,24 +1257,31 @@ void BasicSystem::solve_gd_rhcr()
 
     auto t_cycle_end = std::chrono::steady_clock::now();
     double t_cycle_total_ms = std::chrono::duration<double, std::milli>(t_cycle_end - t_cycle_start).count();
-    double t_serial_rest_ms = std::max(0.0, t_cycle_total_ms - (t_part_ms + t_dispatch_ms + t_solve_wall_ms + t_merge_ms));
+    double t_serial_rest_ms = std::max(0.0, t_cycle_total_ms - (t_part_ms + t_dispatch_ms + t_solve_wall_ms + local_resolve_time_ms + global_fallback_time_ms));
 
     if (metrics_logger) {
         metrics::EpisodeMetrics em;
         em.episode_id = episode_count++;
         em.timestep = timestep;
-        em.num_groups = static_cast<int>(groups.size());
+        em.num_groups = groups_after;
         em.group_sizes = group_sizes_str;
-        em.solve_time_ms = t_solve_wall_ms + t_fallback_ms;
-        em.max_group_solve_ms = max_group_ms;
-        em.min_group_solve_ms = min_group_ms;
-        em.mean_group_solve_ms = mean_group_ms;
+        em.solve_time_ms = t_solve_wall_ms + local_resolve_time_ms + global_fallback_time_ms;
+        em.max_group_solve_ms = 0.0;
+        em.min_group_solve_ms = 0.0;
+        em.mean_group_solve_ms = 0.0;
         em.t_partition_ms = t_part_ms;
         em.t_dispatch_ms = t_dispatch_ms;
         em.t_barrier_wait_ms = t_barrier_wait_ms;
-        em.merge_time_ms = t_merge_ms;
+        em.merge_time_ms = local_resolve_time_ms;
         em.t_serial_rest_ms = t_serial_rest_ms;
         em.inter_group_collisions = inter_group_collisions;
+        em.groups_before = groups_before;
+        em.groups_after = groups_after;
+        em.merges_performed = merges_performed;
+        em.local_resolve_time_ms = local_resolve_time_ms;
+        em.global_fallback_time_ms = global_fallback_time_ms;
+        em.global_fallback_invoked = global_fallback_invoked;
+        em.per_worker_busy_ms = per_worker_busy_str;
         metrics_logger->logEpisodeMetrics(em);
     }
 }

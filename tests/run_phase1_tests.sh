@@ -94,9 +94,9 @@ C3_STATUS=0
 
 if [[ -f "$TSAN_BIN" && -f "$ASAN_BIN" ]]; then
     # Test TSan at 2, 4, 8 threads
-    "$TSAN_BIN" --map "${PROJECT_ROOT}/maps/kiva.map" --scenario KIVA --solver PBS --agentNum 30 --simulation_time 15 --seed 42 --parallel on --threads 4 --vis_radius 5 --output_dir /tmp/c3_tsan >/dev/null 2>&1 || C3_STATUS=1
+    "$TSAN_BIN" --map "${PROJECT_ROOT}/maps/kiva.map" --scenario KIVA --solver PBS --agentNum 30 --simulation_time 15 --planning_window 10 --planning_horizon 5 --seed 42 --parallel on --threads 4 --vis_radius 5 --output_dir /tmp/c3_tsan >/dev/null 2>&1 || C3_STATUS=1
     # Test ASan at 2, 4, 8 threads
-    "$ASAN_BIN" --map "${PROJECT_ROOT}/maps/kiva.map" --scenario KIVA --solver PBS --agentNum 30 --simulation_time 15 --seed 42 --parallel on --threads 8 --vis_radius 5 --output_dir /tmp/c3_asan >/dev/null 2>&1 || C3_STATUS=1
+    "$ASAN_BIN" --map "${PROJECT_ROOT}/maps/kiva.map" --scenario KIVA --solver PBS --agentNum 30 --simulation_time 15 --planning_window 10 --planning_horizon 5 --seed 42 --parallel on --threads 8 --vis_radius 5 --output_dir /tmp/c3_asan >/dev/null 2>&1 || C3_STATUS=1
 else
     echo "  Sanitizer binaries missing, running on release binary..."
     C3_STATUS=1

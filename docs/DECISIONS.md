@@ -186,29 +186,48 @@ This document records all architectural choices, assumptions, trade-offs, and in
 
 ---
 
-### D-013: Provenance Audit, Commit-Keyed Resume Mode, and Constant-Density Scaling Design
+### D-014: Analysis Corrections, Sequential Fallback Profiling, and Invalidation of Unversioned Numbers (Step 0)
 * **Date:** 2026-10-31
-* **Context:** Rigorous audit of experiment provenance, verifier horizon, and spatial scaling limitations.
-* **Audit Findings & Actions:**
-  1. **Provenance Invalidation:**
-     - 71 runs generated on 2026-10-30 under commit `69c2217` (`e1_kiva_a100_*` and `e1_kiva_a400_t1_s42`) predated bug fixes D-010 (PBS/ECBS endpoint holding) and D-011 (LRAStar edge-swap resolution).
-     - These 71 runs were formally invalidated and deleted from `results/raw/`.
-     - The remaining 509 runs were confirmed to be produced under commit `2bd958e`.
-  2. **Self-Describing Provenance & Resume Keying:**
-     - Added `git_commit` column to `metrics/metrics_schema.json`, `RunConfig`, `metrics_logger.h`, `BasicSystem`, and CLI option `--git_commit` in `driver.cpp`.
-     - Updated `experiments/run_full_campaign.py` resume mode to check `run_commit == current_commit`. Any run file lacking a matching commit hash is automatically invalidated and re-run.
-  3. **Verifier Horizon & Stationary Holding:**
-     - Simulation horizon $T_{\text{sim}} = 50$, $h = 5$, $w = 10$, yielding 10 replan episodes per run.
-     - `scripts/verify_collision_freedom.py` verifies all executed timesteps $t \in [0, \max_t]$.
-     - Identified that 50 steps is too short for deadline workloads due to 20–30 timestep average travel times (yielding only 1–3 completions per agent and discrete quantization noise). Lengthened deadline horizon to $T_{\text{sim}} = 250$ (50 replanning episodes) for steady-state queue dynamics.
-     - Enhanced `verify_collision_freedom.py` to explicitly enforce stationary holding at the final goal location for agents whose paths finish before $\max_t$.
-  4. **Constant-Density Warehouse Scaling Design:**
-     - Fixed-dimension warehouse maps suffer from spatial percolation as $N$ grows ($N=400$ on fixed $33\times 46$ reaches 31% density, merging all agents into 1 group).
-     - Implemented `scripts/tile_maps.py` to tile KIVA warehouse map $1\times 1$ ($N=50$), $2\times 1$ ($N=100$), $2\times 2$ ($N=200$), $4\times 2$ ($N=400$), and $4\times 4$ ($N=800$), strictly preserving agent density ($N/\text{Area} = 50/1518 \approx 0.0329$).
-     - Preserves linear group scaling ($4.6 \to 39.0$ groups at $V=4$) and drops largest-group fraction ($46\% \to 16\%$), isolating parallel core scaling from density percolation.
+* **Context:** Analysis audit of the constant-density scaling benchmark under `code-freeze-v1`.
+* **Actions & Findings:**
+  1. **N=800 Throughput-Ratio CI Recomputation:**
+     - In `run_constant_density_campaign.py`, `bootstrap_ci` computed a 95% CI on the sample *mean* (`[1.000816, 1.010052]`, mean = 1.004553) while reporting the sample *median* (1.000637).
+     - Because the distribution of ratios across the 10 seeds has five 1.0 values (where fallback ran 100%) and five slightly higher values, the mean is higher than the median.
+     - Recomputed 95% bootstrap CI for the **median**: `[1.000000, 1.007524]` (median = 1.000637).
+     - Recomputed 95% bootstrap CI for the **mean**: `[1.000816, 1.010052]` (mean = 1.004553).
+     - Both estimator and CI are now strictly aligned.
+  2. **Vacuous Plan Quality Parity at High Fallback Rates:**
+     - The quality parity reported in `constant_density_quality_parity.csv` (throughput ratio vs V0 = 1.000–1.014x) is noted as *vacuous at high fallback rates*: when fallback occurs on 83%–95% of replan cycles, the planner literally executes the vanilla centralized RHCR solver on those cycles. Thus, plan equality is an artifact of falling back to vanilla RHCR, not parallel planning parity.
+  3. **Confirmation of Global Sequential Fallback in Code:**
+     - Confirmed in `src/BasicSystem.cpp` (lines 1062–1076) that on merge failure, `run_sequential_solve_core()` is invoked.
+     - `run_sequential_solve_core()` calls `solver.run(starts, goal_locations, time_limit)` on the **entire global instance of all N agents** from scratch.
+     - Profiling confirms that at $N=400$ and $N=800$, sequential fallback accounts for **53.7% to 58.2% of total V1 solver runtime**. The remaining 41.8% to 46.3% of solver time is spent computing group solves whose trajectories are subsequently discarded upon merge failure.
+  4. **Formally Voided Legacy Numbers Inventory:**
+     - The following figures from pre-code-freeze runs lack commit hashes or full-horizon verification and are formally declared **void**:
+       - `2.6x` (synthetic stub scaling)
+       - `1.41x` (pre-code-freeze KIVA parallel speedup)
+       - `1.45x` (pre-code-freeze sorting center speedup)
+       - `63% fewer overdue tasks` (short-horizon smoke estimate)
+       - `1.24x` (unversioned real-time coupling speedup)
+       - `580/580 verified` (unversioned 50-step run set)
+       - All unversioned `~` estimates in legacy drafts.
 
 
+---
 
-
-
+### D-015: Local Conflict Resolution Core & Code Freeze v2
+* **Date:** 2026-10-31
+* **Context:** In code-freeze-v1, any inter-group boundary collision triggered an immediate, full global sequential solve across all N agents. This wasted 53%–58% of solver time on discarded group solves and stalled parallel speedup at ~1.0x.
+* **Implementation:**
+  1. **Thread-Local Worker Attribution:** inc/ThreadPool.h tracks worker thread index (0..p-1) via get_worker_id(). GroupPlanningResult tags returning solutions with worker_id for exact CPU runtime accounting.
+  2. **Inter-Group Conflict Detection:** find_inter_group_conflicts(...) checks joint paths across spatial group boundaries in O(N w log N) using spacetime hash sets, returning conflicting group index pairs (g1, g2).
+  3. **Disjoint Set Union (DSU) Iterative Local Merge:**
+     - Connected components of conflicting groups are merged using DisjointSet.
+     - Non-conflicting groups are retained unchanged.
+     - Merged sub-problems are re-dispatched concurrently to the thread pool for up to 3 local resolution passes.
+     - Global sequential fallback is reserved strictly as a last resort if all groups collapse into a single component or local resolution fails.
+  4. **Metrics Schema Extension:** Added groups_before, groups_after, merges_performed, local_resolve_time_ms, global_fallback_time_ms, global_fallback_invoked, and per_worker_busy_ms to EpisodeMetrics.
+  5. **Verification & Code Freeze:**
+     - Verified deterministic equivalence (C1), collision-free verifier (C2), ThreadSanitizer & AddressSanitizer cleanliness at 2, 4, 8 threads (C3), group partitioning logic (C4), task accounting (C5), and bit-for-bit reproducibility (C6).
+     - Tagged commit as code-freeze-v2.
 
